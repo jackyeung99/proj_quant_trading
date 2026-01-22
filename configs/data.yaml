@@ -1,0 +1,15 @@
+storage:
+  backend: local
+  base_dir: "."
+
+ingestion:
+  provider: yfinance
+  symbols: ["SPY", "XLE"]
+  start: "2018-01-01"
+  interval: "1d"
+  auto_adjust: true
+
+paths:
+  bronze_prefix: "data/bronze/yfinance"
+  processed_prefix: "data/processed"
+  processed_returns_key: "data/processed/returns_daily.parquet"

@@ -1,0 +1,9 @@
+.venv
+.env
+notebooks/.cache.sqlite
+notebooks/DEBUG.ipynb
+**/__pycache__/
+
+build/
+dist/
+*.egg-info/
