@@ -5,7 +5,8 @@ storage:
 ingestion:
   provider: yfinance
   symbols: ["SPY", "XLE"]
-  start: "2018-01-01"
+  start: "2025-01-01"
+  end: "2026-01-01"
   interval: "1d"
   auto_adjust: true
 

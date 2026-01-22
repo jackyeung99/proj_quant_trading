@@ -2,7 +2,7 @@ strategy_name: BuyHold
 universe: XLE
 data_path: data/processed/sample_returns.csv
 date_col: date
-ret_col: ret
+ret_col: XLE_r
 weight_lag: 1
 tag: mvp
 params: {}
