@@ -44,7 +44,6 @@ def main():
     # ------------------
     # Write bronze prices
     # ------------------
-    df = pd.DataFrame()
     bronze_path = Path(path_cfg["bronze_prefix"]) / "prices_daily.parquet"
 
     storage.write_parquet(df, bronze_path)
@@ -55,7 +54,7 @@ def main():
     returns = pd.DataFrame(index=df.index)
 
     for col in df.columns:
-        returns[f"{col}_ret"] = transforms.log_returns(df[col])
+        returns[f"{col}_ret"] = transforms.log_returns(df, col)
 
     returns = returns.dropna()
 

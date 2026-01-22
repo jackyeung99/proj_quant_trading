@@ -64,4 +64,4 @@ def plot_equity(run_id):
     return fig
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run(debug=True)

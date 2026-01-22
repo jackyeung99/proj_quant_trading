@@ -11,11 +11,14 @@ def main():
     cfg = yaml.safe_load(Path("configs/run_buyhold.yaml").read_text())
     spec = RunSpec(**cfg)
 
+
     result = run_backtest(spec)
 
     storage = LocalStorage(base_dir=Path("."))  # project root
     paths = StoragePaths(root="results")
     store = ArtifactsStore(storage, paths)
+
+
 
     store.write_run(result.meta, result.timeseries, result.metrics)
     print("Wrote run:", result.meta.run_id)

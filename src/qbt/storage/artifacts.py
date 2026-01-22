@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Dict, Any, Optional, List
 import pandas as pd
+import json
 
 from qbt.core.exceptions import StorageError
 from qbt.core.types import RunMeta
@@ -46,7 +47,7 @@ class ArtifactsStore:
             "data_path": meta.data_path,
             "weight_lag": meta.weight_lag,
             "tag": meta.tag,
-            "params": meta.params,
+            "params": json.dumps(meta.params or {}, sort_keys=True),
         }
         runs_df = self.storage.read_parquet(runs_key) if self.storage.exists(runs_key) else pd.DataFrame()
         runs_df = self._upsert(runs_df, row, key="run_id")

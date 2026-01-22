@@ -22,11 +22,12 @@ def load_data(spec: RunSpec) -> pd.DataFrame:
     else:
         raise InvalidRunSpec(f"Unsupported data_path: {path}")
 
-    if spec.date_col not in df.columns or spec.ret_col not in df.columns:
+    if spec.ret_col not in df.columns:
         raise DataError(f"Data must contain columns: {spec.date_col}, {spec.ret_col}")
 
-    df[spec.date_col] = pd.to_datetime(df[spec.date_col])
-    df = df.sort_values(spec.date_col).set_index(spec.date_col)
+    # df[spec.date_col] = pd.to_datetime(df[spec.date_col])
+    # df = df.sort_values(spec.date_col).set_index(spec.date_col)
+    df = df.sort_index(axis=0, ascending=True, inplace=False)
     df = df[[spec.ret_col]].rename(columns={spec.ret_col: "ret"})
     if df["ret"].isna().any():
         df = df.dropna()
