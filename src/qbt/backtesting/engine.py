@@ -4,10 +4,12 @@ from typing import Dict, Any
 import pandas as pd
 import numpy as np
 
-from qbt.core.types import RunSpec, RunMeta, RunResult
+from qbt.core.types import RunSpec, RunMeta, RunResult, WalkForwardSpec
 from qbt.core.exceptions import DataError, InvalidRunSpec
 from qbt.strategies.buy_hold import BuyHoldStrategy
 from qbt.metrics.summary import compute_metrics
+from qbt.backtesting.splitter import iter_walk_forward_splits
+from qbt.execution.simulator import simulate_strategy_execution
 
 _STRATEGY_MAP = {
     "BuyHold": BuyHoldStrategy,
@@ -37,7 +39,13 @@ def make_run_id(strategy: str, universe: str) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return f"{ts}_{strategy}_{universe}"
 
-def run_backtest(spec: RunSpec) -> RunResult:
+def run_backtest(spec: "RunSpec") -> "RunResult":
+    wf_cfg = (spec.params or {}).get("walk_forward")  # or add spec.walk_forward
+    if wf_cfg:
+        wf = WalkForwardSpec(**wf_cfg)
+        return run_backtest_walk_forward(spec, wf)
+
+    # ---- existing single-shot behavior ----
     data = load_data(spec)
 
     if spec.strategy_name not in _STRATEGY_MAP:
@@ -46,25 +54,7 @@ def run_backtest(spec: RunSpec) -> RunResult:
     strat = _STRATEGY_MAP[spec.strategy_name]()
     w = strat.compute_weight(data, spec).astype(float)
 
-    # central timing rule: apply lag so weight decided at t-1 applies to return at t
-    w_lagged = w.shift(spec.weight_lag).fillna(0.0)
-
-    ret_gross = w_lagged * data["ret"]
-    ret_net = ret_gross.copy()  # MVP: no costs
-
-    equity_gross = (1.0 + ret_gross).cumprod()
-    equity_net = (1.0 + ret_net).cumprod()
-
-    ts_df = pd.DataFrame(
-        {
-            "weight": w_lagged,
-            "ret_gross": ret_gross,
-            "ret_net": ret_net,
-            "equity_gross": equity_gross,
-            "equity_net": equity_net,
-        },
-        index=data.index,
-    )
+    ts_df = simulate_strategy_execution(data, w, spec.weight_lag)
 
     run_id = make_run_id(spec.strategy_name, spec.universe)
     meta = RunMeta(
@@ -80,3 +70,46 @@ def run_backtest(spec: RunSpec) -> RunResult:
 
     metrics = compute_metrics(ts_df["ret_net"])
     return RunResult(meta=meta, timeseries=ts_df, metrics=metrics)
+
+
+
+def run_backtest_walk_forward(spec: "RunSpec", wf: WalkForwardSpec) -> "RunResult":
+    data = load_data(spec)
+
+    if spec.strategy_name not in _STRATEGY_MAP:
+        raise InvalidRunSpec(f"Unknown strategy_name={spec.strategy_name!r}")
+
+    strat = _STRATEGY_MAP[spec.strategy_name]()
+
+    # this will hold weights for all dates (only populated on test windows)
+    full_w = pd.Series(0.0, index=data.index, dtype=float)
+
+    for train_idx, test_idx in iter_walk_forward_splits(data.index, wf):
+        train = data.loc[train_idx]
+        test = data.loc[test_idx]
+
+        strat.fit(train, spec)
+
+        # IMPORTANT: compute weights ONLY for the test period
+        w_test = strat.compute_weight(test, spec).astype(float).reindex(test.index)
+
+        # stitch into the full weight vector
+        full_w.loc[test.index] = w_test
+
+    ts_df = simulate_strategy_execution(data, full_w, spec.weight_lag)
+
+    run_id = make_run_id(spec.strategy_name, spec.universe)
+    meta = RunMeta(
+        run_id=run_id,
+        strategy_name=spec.strategy_name,
+        universe=spec.universe,
+        created_at_utc=datetime.now(timezone.utc).isoformat(),
+        data_path=spec.data_path,
+        weight_lag=spec.weight_lag,
+        params={**(spec.params or {}), "walk_forward": True, "wf": wf.__dict__},
+        tag=spec.tag,
+    )
+
+    metrics = compute_metrics(ts_df["ret_net"])
+    return RunResult(meta=meta, timeseries=ts_df, metrics=metrics)
+

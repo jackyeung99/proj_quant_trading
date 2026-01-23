@@ -30,3 +30,11 @@ class RunResult:
     meta: RunMeta
     timeseries: pd.DataFrame  # indexed by date
     metrics: Dict[str, Any]
+
+@dataclass(frozen=True)
+class WalkForwardSpec:
+    train_size: int          # number of rows/days in train window
+    test_size: int           # number of rows/days in test window
+    step_size: int | None = None   # default = test_size
+    expanding: bool = False        # if True, train expands instead of rolling
+    min_train: int | None = None   # optional warmup guard
