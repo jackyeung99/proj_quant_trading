@@ -1,7 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 import pandas as pd
+
+SizeLike = Union[int, float, str, None]
 
 @dataclass(frozen=True)
 class RunSpec:
@@ -33,8 +35,9 @@ class RunResult:
 
 @dataclass(frozen=True)
 class WalkForwardSpec:
-    train_size: int          # number of rows/days in train window
-    test_size: int           # number of rows/days in test window
-    step_size: int | None = None   # default = test_size
-    expanding: bool = False        # if True, train expands instead of rolling
-    min_train: int | None = None   # optional warmup guard
+    # Allow rows OR percent/fraction
+    train_size: SizeLike          # int rows, float fraction, or "60%"
+    test_size: SizeLike           # int rows, float fraction, or "20%"
+    step_size: SizeLike = None    # default = test_size (after conversion)
+    expanding: bool = False
+    min_train: SizeLike = None    # optional warmup guard

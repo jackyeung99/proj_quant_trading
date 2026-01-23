@@ -9,7 +9,7 @@ from qbt.core.types import RunMeta
 from qbt.storage.storage import Storage
 from qbt.storage.paths import StoragePaths
 
-_REQUIRED_TS_COLS = ["ret_gross", "ret_net", "equity_gross", "equity_net", "weight"]
+_REQUIRED_TS_COLS = ["port_ret_gross", "port_ret_net", "equity_gross", "equity_net"]
 
 class ArtifactsStore:
     def __init__(self, storage: Storage, paths: StoragePaths):

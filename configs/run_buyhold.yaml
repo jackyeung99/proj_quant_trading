@@ -1,8 +1,0 @@
-strategy_name: BuyHold
-universe: XLE
-data_path: data/processed/returns_daily.parquet
-date_col: timestamp
-ret_col: XLE_ret
-weight_lag: 1
-tag: mvp
-params: {}

@@ -1,0 +1,17 @@
+strategy_name: StateSplit
+universe: XLE
+data_path: data/processed/modeling_table.parquet
+date_col: timestamp
+ret_col: ret_xle
+weight_lag: 1
+tag: mvp
+params:
+  state_var: rv_xle    
+  gamma: 5.0
+  min_frac: 0.10
+  lag_state: 1
+  w_min: 0.0
+  w_max: 1.0
+  ann_factor: 252
+
+

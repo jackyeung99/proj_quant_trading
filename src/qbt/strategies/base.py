@@ -8,3 +8,8 @@ class Strategy(ABC):
     def compute_weight(self, data: pd.DataFrame, spec: RunSpec) -> pd.Series:
         """Return target weight series indexed like data."""
         raise NotImplementedError
+    
+    @abstractmethod
+    def fit(self, train: pd.DataFrame, spec: RunSpec) -> pd.Series:
+        """Return target weight series indexed like data."""
+        raise NotImplementedError

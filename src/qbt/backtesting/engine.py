@@ -6,40 +6,64 @@ import numpy as np
 
 from qbt.core.types import RunSpec, RunMeta, RunResult, WalkForwardSpec
 from qbt.core.exceptions import DataError, InvalidRunSpec
-from qbt.strategies.buy_hold import BuyHoldStrategy
 from qbt.metrics.summary import compute_metrics
 from qbt.backtesting.splitter import iter_walk_forward_splits
 from qbt.execution.simulator import simulate_strategy_execution
 
+from qbt.strategies.buy_hold import BuyHoldStrategy
+from qbt.strategies.single_var_state_model import StateStrategy
+
 _STRATEGY_MAP = {
     "BuyHold": BuyHoldStrategy,
+    "StateSplit": StateStrategy
 }
 
 def load_data(spec: RunSpec) -> pd.DataFrame:
     path = spec.data_path
     if path.endswith(".csv"):
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, index_col=0, parse_dates=True)
     elif path.endswith(".parquet"):
         df = pd.read_parquet(path)
     else:
         raise InvalidRunSpec(f"Unsupported data_path: {path}")
 
     if spec.ret_col not in df.columns:
-        raise DataError(f"Data must contain columns: {spec.date_col}, {spec.ret_col}")
+        raise DataError(f"Data must contain column: {spec.ret_col}")
 
-    # df[spec.date_col] = pd.to_datetime(df[spec.date_col])
-    # df = df.sort_values(spec.date_col).set_index(spec.date_col)
+
+    # sort by datetime index
     df = df.sort_index(axis=0, ascending=True, inplace=False)
-    df = df[[spec.ret_col]].rename(columns={spec.ret_col: "ret"})
-    if df["ret"].isna().any():
-        df = df.dropna()
+
+    # rename return column to standard name
+    df = df.rename(columns={spec.ret_col: "ret"})
+
+    #scaled
+    df['ret'] = df['ret'] / 100
+
+
+    # always drop rows with missing returns
+    na_subset = ["ret"]
+
+    # if state_var exists in params, also require it
+    params = spec.params or {}
+    state_var = params.get("state_var")
+    if state_var is not None and state_var in df.columns:
+        na_subset.append(state_var)
+
+    df = df.dropna(subset=na_subset)
+
     return df
 
 def make_run_id(strategy: str, universe: str) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return f"{ts}_{strategy}_{universe}"
 
-def run_backtest(spec: "RunSpec") -> "RunResult":
+def run_backtest(spec: RunSpec, wf: WalkForwardSpec | None = None) -> RunResult:
+    if wf is None:
+        return run_backtest_single(spec)
+    return run_backtest_walk_forward(spec, wf)
+
+def run_backtest_single(spec: "RunSpec") -> "RunResult":
     wf_cfg = (spec.params or {}).get("walk_forward")  # or add spec.walk_forward
     if wf_cfg:
         wf = WalkForwardSpec(**wf_cfg)
@@ -68,7 +92,7 @@ def run_backtest(spec: "RunSpec") -> "RunResult":
         tag=spec.tag,
     )
 
-    metrics = compute_metrics(ts_df["ret_net"])
+    metrics = compute_metrics(ts_df["port_ret_gross"])
     return RunResult(meta=meta, timeseries=ts_df, metrics=metrics)
 
 
@@ -90,7 +114,6 @@ def run_backtest_walk_forward(spec: "RunSpec", wf: WalkForwardSpec) -> "RunResul
 
         strat.fit(train, spec)
 
-        # IMPORTANT: compute weights ONLY for the test period
         w_test = strat.compute_weight(test, spec).astype(float).reindex(test.index)
 
         # stitch into the full weight vector
@@ -110,6 +133,6 @@ def run_backtest_walk_forward(spec: "RunSpec", wf: WalkForwardSpec) -> "RunResul
         tag=spec.tag,
     )
 
-    metrics = compute_metrics(ts_df["ret_net"])
+    metrics = compute_metrics(ts_df["port_ret_gross"])
     return RunResult(meta=meta, timeseries=ts_df, metrics=metrics)
 
