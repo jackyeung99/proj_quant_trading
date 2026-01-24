@@ -37,6 +37,7 @@ class StoragePaths:
     def metrics_key(self) -> str:
         return str(PurePosixPath(self.root) / "metrics.parquet")
 
+
     # ---- per-run artifacts ----
     def run_meta_key(self, run_id: str) -> str:
         return str(PurePosixPath(self.root) / "runs" / _clean(run_id) / "meta.json")

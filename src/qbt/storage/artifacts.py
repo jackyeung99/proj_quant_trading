@@ -64,6 +64,10 @@ class ArtifactsStore:
         key = self.paths.runs_key()
         return self.storage.read_parquet(key) if self.storage.exists(key) else pd.DataFrame()
 
+    def read_meta(self, run_id) -> pd.DataFrame:
+        key = self.paths.run_meta_key(run_id)
+        return self.storage.read_json(key) if self.storage.exists(key) else {}
+
     def read_metrics(self) -> pd.DataFrame:
         key = self.paths.metrics_key()
         return self.storage.read_parquet(key) if self.storage.exists(key) else pd.DataFrame()
