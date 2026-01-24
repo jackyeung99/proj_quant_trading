@@ -1,8 +1,8 @@
-strategy_name: StateSplit
+strategy_name: StateSignal
 universe: XLE
 data_path: data/processed/modeling_table.parquet
 date_col: timestamp
-ret_col: ret_xle
+assets: [ret_xle]
 weight_lag: 1
 tag: mvp
 params:

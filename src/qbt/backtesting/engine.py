@@ -1,138 +1,127 @@
 from __future__ import annotations
-from datetime import datetime, timezone
-from typing import Dict, Any
-import pandas as pd
-import numpy as np
 
-from qbt.core.types import RunSpec, RunMeta, RunResult, WalkForwardSpec
-from qbt.core.exceptions import DataError, InvalidRunSpec
+from datetime import datetime, timezone
+from dataclasses import dataclass, field
+
+import pandas as pd
+
+from qbt.core.types import RunSpec, RunMeta, RunResult, WalkForwardSpec, ModelInputs
 from qbt.metrics.summary import compute_metrics
 from qbt.backtesting.splitter import iter_walk_forward_splits
 from qbt.execution.simulator import simulate_strategy_execution
+from qbt.data.dataloader import DataAdapter, DefaultDataAdapter
 
-from qbt.strategies.buy_hold import BuyHoldStrategy
-from qbt.strategies.single_var_state_model import StateStrategy
+from qbt.strategies.registry import create_strategy, available_strategies
+from qbt.strategies.base import Strategy
 
-_STRATEGY_MAP = {
-    "BuyHold": BuyHoldStrategy,
-    "StateSplit": StateStrategy
-}
-
-def load_data(spec: RunSpec) -> pd.DataFrame:
-    path = spec.data_path
-    if path.endswith(".csv"):
-        df = pd.read_csv(path, index_col=0, parse_dates=True)
-    elif path.endswith(".parquet"):
-        df = pd.read_parquet(path)
-    else:
-        raise InvalidRunSpec(f"Unsupported data_path: {path}")
-
-    if spec.ret_col not in df.columns:
-        raise DataError(f"Data must contain column: {spec.ret_col}")
-
-
-    # sort by datetime index
-    df = df.sort_index(axis=0, ascending=True, inplace=False)
-
-    # rename return column to standard name
-    df = df.rename(columns={spec.ret_col: "ret"})
-
-    #scaled
-    df['ret'] = df['ret'] / 100
-
-
-    # always drop rows with missing returns
-    na_subset = ["ret"]
-
-    # if state_var exists in params, also require it
-    params = spec.params or {}
-    state_var = params.get("state_var")
-    if state_var is not None and state_var in df.columns:
-        na_subset.append(state_var)
-
-    df = df.dropna(subset=na_subset)
-
-    return df
 
 def make_run_id(strategy: str, universe: str) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return f"{ts}_{strategy}_{universe}"
 
-def run_backtest(spec: RunSpec, wf: WalkForwardSpec | None = None) -> RunResult:
-    if wf is None:
-        return run_backtest_single(spec)
-    return run_backtest_walk_forward(spec, wf)
 
-def run_backtest_single(spec: "RunSpec") -> "RunResult":
-    wf_cfg = (spec.params or {}).get("walk_forward")  # or add spec.walk_forward
-    if wf_cfg:
-        wf = WalkForwardSpec(**wf_cfg)
-        return run_backtest_walk_forward(spec, wf)
+def _normalize_weights_to_df(
+    w: pd.Series | pd.DataFrame,
+    index: pd.Index,
+    assets: list[str],
+) -> pd.DataFrame:
+    """
+    Normalize strategy output to a [T x N] DataFrame aligned to (index, assets).
+    """
+    if isinstance(w, pd.Series):
+        # broadcast single series to all assets
+        w_df = pd.concat({a: w for a in assets}, axis=1)
+    else:
+        w_df = w
 
-    # ---- existing single-shot behavior ----
-    data = load_data(spec)
-
-    if spec.strategy_name not in _STRATEGY_MAP:
-        raise InvalidRunSpec(f"Unknown strategy_name={spec.strategy_name!r}")
-
-    strat = _STRATEGY_MAP[spec.strategy_name]()
-    w = strat.compute_weight(data, spec).astype(float)
-
-    ts_df = simulate_strategy_execution(data, w, spec.weight_lag)
-
-    run_id = make_run_id(spec.strategy_name, spec.universe)
-    meta = RunMeta(
-        run_id=run_id,
-        strategy_name=spec.strategy_name,
-        universe=spec.universe,
-        created_at_utc=datetime.now(timezone.utc).isoformat(),
-        data_path=spec.data_path,
-        weight_lag=spec.weight_lag,
-        params=spec.params or {},
-        tag=spec.tag,
-    )
-
-    metrics = compute_metrics(ts_df["port_ret_gross"])
-    return RunResult(meta=meta, timeseries=ts_df, metrics=metrics)
+    return w_df.reindex(index=index).reindex(columns=assets).fillna(0.0)
 
 
+def build_weights_single(
+    inputs: ModelInputs,
+    strat: Strategy,
+    spec: RunSpec,
+    assets: list[str],
+) -> pd.DataFrame:
+    strat.fit(inputs, spec)
+    w = strat.compute_weight(inputs, spec)  # Series or DataFrame
+    return _normalize_weights_to_df(w, index=inputs.ret.index, assets=assets)
 
-def run_backtest_walk_forward(spec: "RunSpec", wf: WalkForwardSpec) -> "RunResult":
-    data = load_data(spec)
 
-    if spec.strategy_name not in _STRATEGY_MAP:
-        raise InvalidRunSpec(f"Unknown strategy_name={spec.strategy_name!r}")
+def build_weights_walk_forward(
+    inputs: ModelInputs,
+    strat: Strategy,
+    spec: RunSpec,
+    wf: WalkForwardSpec,
+    assets: list[str],
+) -> pd.DataFrame:
+    full_w = pd.DataFrame(0.0, index=inputs.ret.index, columns=assets)
 
-    strat = _STRATEGY_MAP[spec.strategy_name]()
+    for train_idx, test_idx in iter_walk_forward_splits(inputs.ret.index, wf):
+        train_inputs = ModelInputs(
+            ret=inputs.ret.loc[train_idx],
+            features=inputs.features.loc[train_idx],
+        )
+        test_inputs = ModelInputs(
+            ret=inputs.ret.loc[test_idx],
+            features=inputs.features.loc[test_idx],
+        )
 
-    # this will hold weights for all dates (only populated on test windows)
-    full_w = pd.Series(0.0, index=data.index, dtype=float)
+        strat.fit(train_inputs, spec)
+        w_test = strat.predict(test_inputs, spec)
 
-    for train_idx, test_idx in iter_walk_forward_splits(data.index, wf):
-        train = data.loc[train_idx]
-        test = data.loc[test_idx]
+        w_test_df = _normalize_weights_to_df(
+            w_test, index=test_inputs.ret.index, assets=assets
+        )
 
-        strat.fit(train, spec)
+        full_w.loc[test_inputs.ret.index, :] = w_test_df
 
-        w_test = strat.compute_weight(test, spec).astype(float).reindex(test.index)
+    return full_w
 
-        # stitch into the full weight vector
-        full_w.loc[test.index] = w_test
 
-    ts_df = simulate_strategy_execution(data, full_w, spec.weight_lag)
+@dataclass
+class BacktestEngine:
+    data_adapter: DataAdapter = field(default_factory=DefaultDataAdapter)
 
-    run_id = make_run_id(spec.strategy_name, spec.universe)
-    meta = RunMeta(
-        run_id=run_id,
-        strategy_name=spec.strategy_name,
-        universe=spec.universe,
-        created_at_utc=datetime.now(timezone.utc).isoformat(),
-        data_path=spec.data_path,
-        weight_lag=spec.weight_lag,
-        params={**(spec.params or {}), "walk_forward": True, "wf": wf.__dict__},
-        tag=spec.tag,
-    )
+    def run(self, spec: RunSpec, wf: WalkForwardSpec | None = None) -> RunResult:
 
-    metrics = compute_metrics(ts_df["port_ret_gross"])
-    return RunResult(meta=meta, timeseries=ts_df, metrics=metrics)
+        strat = create_strategy(spec.strategy_name)
 
+        raw = self.data_adapter.load(spec)
+
+        # With ModelInputs, returns live in inputs.ret, so "required" here should mean required FEATURES.
+        # If you haven't migrated all strategies yet, keep a fallback to required_columns.
+        if hasattr(strat, "required_features"):
+            required_features = strat.required_features(spec)
+        else:
+            required_features = strat.required_columns(spec)
+
+        inputs: ModelInputs = self.data_adapter.prepare(
+            raw,
+            spec,
+            required_cols=required_features,  
+        )
+
+        assets = list(inputs.ret.columns)
+
+        if wf is None:
+            w = build_weights_single(inputs, strat, spec, assets)
+        else:
+            w = build_weights_walk_forward(inputs, strat, spec, wf, assets)
+
+        ts_df = simulate_strategy_execution(inputs.ret, w, spec.weight_lag)
+    
+        run_id = make_run_id(spec.strategy_name, spec.universe)
+        meta = RunMeta(
+            run_id=run_id,
+            strategy_name=spec.strategy_name,
+            universe=spec.universe,
+            created_at_utc=datetime.now(timezone.utc).isoformat(),
+            data_path=spec.data_path,
+            weight_lag=spec.weight_lag,
+            params=spec.params or {},
+            tag=spec.tag,
+        )
+
+        metrics = compute_metrics(ts_df["port_ret_gross"])
+        return RunResult(meta=meta, timeseries=ts_df, metrics=metrics)

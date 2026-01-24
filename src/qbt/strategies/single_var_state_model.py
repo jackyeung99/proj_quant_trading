@@ -3,22 +3,18 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from qbt.core.types import RunSpec
+from qbt.core.types import RunSpec, ModelInputs
 from qbt.strategies.base import Strategy
+from qbt.strategies.registry import register_strategy
+
 from qbt.metrics.summary import _sharpe
 
-
-class StateStrategy(Strategy):
+@register_strategy("StateSignal")
+class StateSignalModel(Strategy):
     """
-    Walk-forward compatible state timing strategy:
-
-    fit(train):
-      - choose tau maximizing Sharpe separation on train
-      - estimate w_low, w_high on train (mean-variance identification)
-
-    compute_weight(test):
-      - apply regime rule using stored tau/w_low/w_high on test
-      - (optionally) lag the state within the test slice
+    Learns a threshold tau that best separates Sharpe in train.
+    Outputs a binary signal:
+      signal[t] = 1 if S_used[t] > tau else 0
     """
 
     def __init__(self) -> None:
@@ -28,31 +24,15 @@ class StateStrategy(Strategy):
         self.lag_state_: int = 1
         self.state_var_: str | None = None
 
-    def __init__(self) -> None:
-        self.tau_ = None
-        self.w_low_ = None
-        self.w_high_ = None
-        self.state_var_ = None
-        self.lag_state_ = 1
-
-    # ----------------------------
-    # Parameter parsing
-    # ----------------------------
-
     def parse_params(self, spec: RunSpec) -> dict:
         params = spec.params or {}
 
         state_var = params.get("state_var")
         if state_var is None:
-            raise ValueError("StateStrategy requires params['state_var'].")
-
-        return_col = spec.ret_col
-        if return_col is None:
-            raise ValueError("RunSpec must define ret_col.")
+            raise ValueError("StateSignalModel requires params['state_var'].")
 
         return {
             "state_var": state_var,
-            "return_col": 'ret',
             "lag_state": int(params.get("lag_state", 1)),
             "min_frac": float(params.get("min_frac", 0.10)),
             "ann_factor": int(params.get("ann_factor", 252)),
@@ -62,32 +42,40 @@ class StateStrategy(Strategy):
             "eps": float(params.get("eps", 1e-12)),
         }
 
-    # ----------------------------
-    # Strategy API
-    # ----------------------------
-
-    def fit(self, train: pd.DataFrame, spec: RunSpec) -> None:
+    def required_columns(self, spec: RunSpec) -> list[str]:
+        """
+        Features needed from inputs.features (returns are always in inputs.ret).
+        """
         p = self.parse_params(spec)
+        return [p["state_var"]]
 
+    def fit(self, inputs: ModelInputs, spec: RunSpec) -> None:
+        p = self.parse_params(spec)
         self.state_var_ = p["state_var"]
         self.lag_state_ = p["lag_state"]
 
-        df = train.copy().sort_index()
+        X = inputs.features.sort_index().copy()
+        r = inputs.ret.sort_index()
 
-        if self.state_var_ not in df.columns:
-            raise ValueError(f"Train data missing state_var column '{self.state_var_}'")
+        if self.state_var_ not in X.columns:
+            raise ValueError(f"Train features missing state_var '{self.state_var_}'")
 
-        df["S_used"] = df[self.state_var_].shift(self.lag_state_)
+        # single-asset assumption for this particular model:
+        if not isinstance(r, pd.DataFrame) or r.shape[1] != 1:
+            raise ValueError("StateSignalModel expects inputs.ret to be [T x 1] for fitting.")
+        r1 = r.iloc[:, 0]
 
-        train_eff = df.dropna(subset=["S_used", p["return_col"]])
-        if train_eff.empty or len(train_eff) < 20:
+        S_used = X[self.state_var_].shift(self.lag_state_)
+        df = pd.DataFrame({"S_used": S_used, "ret": r1}).dropna()
+
+        if df.empty or len(df) < 20:
             self.tau_, self.w_low_, self.w_high_ = np.nan, 0.0, 0.0
             return
 
         tau = self.choose_tau_max_sep_sharpe(
-            train_eff,
+            df,
             state_var="S_used",
-            return_col=p["return_col"],
+            return_col="ret",
             min_frac=p["min_frac"],
             ann_factor=p["ann_factor"],
         )
@@ -97,10 +85,10 @@ class StateStrategy(Strategy):
             return
 
         w_low, w_high = self.estimate_weights_meanvar(
-            train_eff,
+            df,
             state_var="S_used",
-            return_col=p["return_col"],
-            tau=tau,
+            return_col="ret",
+            tau=float(tau),
             gamma=p["gamma"],
             w_min=p["w_min"],
             w_max=p["w_max"],
@@ -111,28 +99,25 @@ class StateStrategy(Strategy):
         self.w_low_ = float(w_low)
         self.w_high_ = float(w_high)
 
-    def compute_weight(self, data: pd.DataFrame, spec: RunSpec) -> pd.Series:
+    def predict(self, inputs: ModelInputs, spec: RunSpec) -> pd.Series:
         if self.tau_ is None:
-            raise RuntimeError("compute_weight called before fit().")
+            raise RuntimeError("predict called before fit().")
 
         p = self.parse_params(spec)
-        df = data.copy().sort_index()
+        X = inputs.features.sort_index().copy()
 
-        if p["state_var"] not in df.columns:
-            raise ValueError(f"Data missing state_var column '{p['state_var']}'")
+        if p["state_var"] not in X.columns:
+            raise ValueError(f"Features missing state_var '{p['state_var']}'")
 
-        S_used = df[p["state_var"]].shift(self.lag_state_)
+        S_used = X[p["state_var"]].shift(self.lag_state_)
 
-        w = np.where(
-            S_used.isna(),
-            0.0,
-            np.where(S_used > self.tau_, self.w_high_, self.w_low_)
-        )
-
-        return pd.Series(w, index=df.index, name="weight")
+        # binary signal: 1=high regime, 0=low regime (NaN -> 0)
+        sig = (S_used > float(self.tau_)).astype(float).fillna(0.0)
+        sig.name = "state_high"
+        return sig
 
     # ----------------------------
-    # Helpers
+    # Helpers (unchanged)
     # ----------------------------
 
     def choose_tau_max_sep_sharpe(
@@ -144,10 +129,6 @@ class StateStrategy(Strategy):
         ann_factor: int = 252,
         n_grid: int = 201,
     ) -> float | None:
-        """
-        Choose tau to maximize |Sharpe_high - Sharpe_low|.
-        Uses a quantile grid (robust, deterministic).
-        """
         s = df_train[state_var].to_numpy()
         r = df_train[return_col].to_numpy()
 
@@ -190,11 +171,6 @@ class StateStrategy(Strategy):
         w_max: float = 3.0,
         eps: float = 1e-12,
     ) -> tuple[float, float]:
-        """
-        Mean-variance weights per regime:
-            w* = mu / (gamma * var)
-        then clip to [w_min, w_max].
-        """
         s = df_train[state_var]
         r = df_train[return_col]
 

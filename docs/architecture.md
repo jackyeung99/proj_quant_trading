@@ -117,13 +117,23 @@ Artifacts are immutable and versioned by `run_id`.
 
 ## Key Separation of Concerns
 
-| Component | Purpose |
-|--------|--------|
-| Data | What is observable |
-| Strategy | What should be done |
-| Portfolio | How much to trade |
-| Execution | What happens mechanically |
-| Metrics | How good was it |
-| Dashboard | How results are presented |
+Data Layer
+  - ingestion
+  - features
+  - returns
 
----
+Model Layer
+  - Strategy (signals)
+  - Fit / Predict
+
+Portfolio Layer
+  - Allocator (weights)
+  - Constraints
+  - Risk
+
+Execution Layer
+  - Simulator (returns + weights only)
+
+Evaluation Layer
+  - Metrics
+  - Plots

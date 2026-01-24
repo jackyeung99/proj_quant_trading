@@ -11,7 +11,7 @@ class RunSpec:
     universe: str
     data_path: str                 # CSV or parquet path
     date_col: str = "date"
-    ret_col: str = "ret"
+    assets: str = "ret"
     weight_lag: int = 1            # 1 = use weights decided at t-1 for return at t
     params: Dict[str, Any] = None  # strategy params (optional)
     tag: Optional[str] = None
@@ -41,3 +41,9 @@ class WalkForwardSpec:
     step_size: SizeLike = None    # default = test_size (after conversion)
     expanding: bool = False
     min_train: SizeLike = None    # optional warmup guard
+
+
+@dataclass(frozen=True)
+class ModelInputs:
+    ret: pd.DataFrame        # [T x N] returns only (assets as cols)
+    features: pd.DataFrame   # [T x ...] features (wide or multiindex)
