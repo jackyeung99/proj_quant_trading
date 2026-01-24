@@ -1,9 +1,18 @@
-.venv
+# Environments
+.venv/
 .env
+
+# Results
+results/
+
+# Notebooks junk
 notebooks/.cache.sqlite
 notebooks/DEBUG.ipynb
+
+# Python cache
 **/__pycache__/
 
+# Build artifacts
 build/
 dist/
 *.egg-info/

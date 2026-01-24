@@ -66,19 +66,41 @@ def main():
     ]
 
     # StateSignal variants (example: sweep gamma and lag_state)
-    state_variants = []
-    for gamma in [2.0, 5.0, 10.0]:
-        for lag_state in [1, 2, 5]:
-            state_variants.append({
-                "params": {
-                    "gamma": gamma,
-                    "lag_state": lag_state,
-                    # if your feature name differs for SPY, change here:
-                    # e.g., rv_spy instead of rv_xle
-                    "state_var": "rv_spy",
-                },
-                "tag": f"sweep_spy_state_gamma={gamma}_lag={lag_state}",
-            })
+    # --- XLE state runs ---
+    xle_state_vars = ["rv_idio", "rv_spy", "rv_xle"]
+
+    state_variants_xle = []
+
+    for state_var in xle_state_vars:
+        state_variants_xle.append({
+            "universe": "XLE",
+            "assets": ["ret_xle"],
+            "params": {
+                "gamma": 5,
+                "lag_state": 1,
+                "state_var": state_var,
+            },
+            "tag": f"xle_state_{state_var}",
+        })
+
+
+    # --- SPY state runs ---
+    spy_state_vars = ["rv_xle", "macro_log_OVXCLS"]
+
+    state_variants_spy = []
+ 
+    for state_var in spy_state_vars:
+        state_variants_spy.append({
+            "universe": "SPY",
+            "assets": ["ret_spy"],
+            "params": {
+                "gamma": 5,
+                "lag_state": 1,
+                "state_var": state_var,
+            },
+            "tag": f"spy_state_{state_var}",
+        })
+
 
     # --- run them ---
     # BuyHold sweep
@@ -89,10 +111,14 @@ def main():
         cfg.setdefault("tag", "sweep_spy_buyhold")
         run_spec(cfg, wf, store, bt)
 
-    # State sweep
-    for v in state_variants:
-        cfg = deep_update(base_state, common_spy)
-        cfg = deep_update(cfg, v)
+    # --- run XLE ---
+    for v in state_variants_xle:
+        cfg = deep_update(base_state, v)
+        run_spec(cfg, wf, store, bt)
+
+    # --- run SPY ---
+    for v in state_variants_spy:
+        cfg = deep_update(base_state, v)
         run_spec(cfg, wf, store, bt)
 
 

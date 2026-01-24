@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
@@ -16,8 +17,10 @@ from qbt.strategies.base import Strategy
 
 
 def make_run_id(strategy: str, universe: str) -> str:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    return f"{ts}_{strategy}_{universe}"
+    # ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8] + f"_{strategy}_{universe}"
+
+    return run_id
 
 
 def _normalize_weights_to_df(
