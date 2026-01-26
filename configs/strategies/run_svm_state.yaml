@@ -1,0 +1,21 @@
+strategy_name: SVMStateSignal
+universe: XLE
+data_path: data/processed/modeling_table.parquet
+date_col: timestamp
+assets: [ret_xle]
+weight_lag: 1
+tag: mvp
+params:
+  state_var:
+    - macro_log_OVXCLS
+    - macro_DGS10
+  return_threshold: 0.7
+  lag_state: 1
+  gamma: 5.0
+  w_min: 0.0
+  w_max: 1.0
+  svm_params:
+    kernel: rbf
+    C: 1.0
+    gamma: scale
+    class_weight: balanced

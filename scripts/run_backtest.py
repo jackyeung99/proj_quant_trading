@@ -8,6 +8,7 @@ from qbt.backtesting.engine import BacktestEngine
 from qbt.storage.storage import LocalStorage
 from qbt.storage.paths import StoragePaths
 from qbt.storage.artifacts import ArtifactsStore
+from qbt.core.logging import setup_logging
 
 
 def load_yaml(path: str) -> dict:
@@ -72,7 +73,7 @@ def main():
     ]
 
     # --- StateSignal variants ---
-    xle_state_vars = ["rv_idio", "rv_spy", "rv_xle"]
+    xle_state_vars = ["rv_idio", "rv_spy", "rv_xle", "macro_log_OVXCLS", "macro_log_VIXCLS","macro_EFFR", "macro_DGS2", "macro_DGS10", "wx_weather_iforest_score"]
     state_variants_xle = []
     for state_var in xle_state_vars:
         state_variants_xle.append({
@@ -112,4 +113,5 @@ def main():
 
 
 if __name__ == "__main__":
+    setup_logging()
     main()

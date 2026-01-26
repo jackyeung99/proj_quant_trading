@@ -15,6 +15,10 @@ from qbt.data.dataloader import DataAdapter, DefaultDataAdapter
 from qbt.strategies.registry import create_strategy, available_strategies
 from qbt.strategies.base import Strategy
 
+from qbt.core.logging import get_logger
+
+logging = get_logger(__name__)
+
 
 def make_run_id(strategy: str, universe: str) -> str:
     # ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -60,6 +64,7 @@ def build_weights_walk_forward(
 ) -> pd.DataFrame:
     full_w = pd.DataFrame(0.0, index=inputs.ret.index, columns=assets)
 
+    logging.info("Beginning walk forward")
     for train_idx, test_idx in iter_walk_forward_splits(inputs.ret.index, wf):
         train_inputs = ModelInputs(
             ret=inputs.ret.loc[train_idx],
@@ -70,7 +75,9 @@ def build_weights_walk_forward(
             features=inputs.features.loc[test_idx],
         )
 
+        logging.info("Fitting Model")
         strat.fit(train_inputs, spec)
+        logging.info("Predicting")
         w_test = strat.predict(test_inputs, spec)
 
         w_test_df = _normalize_weights_to_df(
@@ -78,7 +85,8 @@ def build_weights_walk_forward(
         )
 
         full_w.loc[test_inputs.ret.index, :] = w_test_df
-
+    
+    logging.info("Finished  walk forward")
     return full_w
 
 
@@ -89,22 +97,19 @@ class BacktestEngine:
     def run(self, spec: RunSpec, wf: WalkForwardSpec | None = None) -> RunResult:
 
         strat = create_strategy(spec.strategy_name)
-
+        
         raw = self.data_adapter.load(spec)
+        required_features = strat.required_features(spec)
+   
 
-        # With ModelInputs, returns live in inputs.ret, so "required" here should mean required FEATURES.
-        # If you haven't migrated all strategies yet, keep a fallback to required_columns.
-        if hasattr(strat, "required_features"):
-            required_features = strat.required_features(spec)
-        else:
-            required_features = strat.required_columns(spec)
-
+        logging.info(required_features)
         inputs: ModelInputs = self.data_adapter.prepare(
             raw,
             spec,
             required_cols=required_features,  
         )
 
+        logging.info("Loaded Model Inputs")
         assets = list(inputs.ret.columns)
 
         if wf is None:

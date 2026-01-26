@@ -1,7 +1,8 @@
 from qbt.strategies import buy_hold
-from qbt.strategies import single_var_state_model
-
+from qbt.strategies import state_model
+from qbt.strategies import svm_state_model
 __all__ = [
     "buy_hold",
-    "single_var_state_model",
+    "state_model",
+    "svm_state_model"
 ]

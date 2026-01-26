@@ -7,7 +7,7 @@ import numpy as np
 @register_strategy("BuyHold")
 class BuyHoldStrategy(Strategy):
 
-    def required_columns(self, spec):
+    def required_features(self, spec):
         return []  # no features needed
     
     def predict(self, inputs, spec):

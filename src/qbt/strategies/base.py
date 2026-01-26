@@ -14,7 +14,7 @@ class Strategy(ABC):
     """
 
     @abstractmethod
-    def required_columns(self, spec: RunSpec) -> List[str]:
+    def required_features(self, spec: RunSpec) -> List[str]:
         """Feature columns needed by the model (not returns)."""
         raise NotImplementedError
 

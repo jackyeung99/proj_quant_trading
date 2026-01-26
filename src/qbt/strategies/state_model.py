@@ -42,7 +42,7 @@ class StateSignalModel(Strategy):
             "eps": float(params.get("eps", 1e-12)),
         }
 
-    def required_columns(self, spec: RunSpec) -> list[str]:
+    def required_features(self, spec: RunSpec) -> list[str]:
         """
         Features needed from inputs.features (returns are always in inputs.ret).
         """
@@ -103,19 +103,26 @@ class StateSignalModel(Strategy):
         if self.tau_ is None:
             raise RuntimeError("predict called before fit().")
 
+        X = inputs.features.sort_index()
+
         p = self.parse_params(spec)
-        X = inputs.features.sort_index().copy()
+        state_var = p["state_var"]
 
-        if p["state_var"] not in X.columns:
-            raise ValueError(f"Features missing state_var '{p['state_var']}'")
+        if state_var not in X.columns:
+            raise ValueError(f"Features missing state_var '{state_var}'")
 
-        S_used = X[p["state_var"]].shift(self.lag_state_)
+        S_used = X[state_var].shift(self.lag_state_)
 
-        # binary signal: 1=high regime, 0=low regime (NaN -> 0)
-        sig = (S_used > float(self.tau_)).astype(float).fillna(0.0)
-        sig.name = "state_high"
-        return sig
+        # 1 = high regime, 0 = low regime
+        sig = (S_used > float(self.tau_)).astype(float)
 
+        # map signal -> weights; NaN -> 0 weight
+        w = np.where(sig.fillna(0.0).values > 0.5, self.w_high_, self.w_low_)
+        w = pd.Series(w, index=S_used.index, name="weight")
+
+        # align to ret index (important in walk-forward)
+        w = w.reindex(inputs.ret.index).fillna(0.0)
+        return w
     # ----------------------------
     # Helpers (unchanged)
     # ----------------------------

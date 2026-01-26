@@ -5,6 +5,10 @@ import pandas as pd
 from qbt.core.exceptions import InvalidRunSpec, DataError
 from qbt.core.types import RunSpec, ModelInputs
 
+from qbt.core.logging import get_logger
+
+logging = get_logger(__name__)
+
 class DataAdapter(Protocol):
     def load(self, spec: "RunSpec") -> pd.DataFrame: ...
     def prepare(self, df: pd.DataFrame, spec: "RunSpec", required_cols: Sequence[str]) -> pd.DataFrame: ...
@@ -21,6 +25,7 @@ class DefaultDataAdapter:
 
     def prepare(self, raw: pd.DataFrame, spec: RunSpec, required_cols: list[str]) -> ModelInputs:
         df = raw.sort_index()
+        logging.info(f'Loaded {len(df)} rows and {len(df.columns)} columns from {spec.data_path}')
 
         # --- returns matrix (ONLY) ---
         # Example: if your returns are stored as columns named like "ret_XLE"
