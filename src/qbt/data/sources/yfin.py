@@ -1,270 +1,218 @@
-
 from __future__ import annotations
 
-from typing import List, Sequence, Union
-import numpy as np
+import time
+from typing import Any, Mapping, Union
+
 import pandas as pd
 import yfinance as yf
-import time 
+
+from qbt.data.sources.source_registry import register_source
+from qbt.data.sources.source_base import DataSource
 
 DateLike = Union[str, pd.Timestamp]
 
 
-def _normalize_range(start: DateLike, end: DateLike) -> tuple[pd.Timestamp, pd.Timestamp]:
-    start_ts = pd.to_datetime(start, utc=True)
-    end_ts = pd.to_datetime(end, utc=True)
-
-    # treat date-only end as inclusive (end-of-day)
-    if end_ts == end_ts.normalize():
-        end_ts = end_ts + pd.Timedelta(days=1)
-
-    return start_ts, end_ts
-
-
-def _chunks(start: pd.Timestamp, end: pd.Timestamp, chunk_days: int) -> List[tuple[pd.Timestamp, pd.Timestamp]]:
+@register_source("yfinance")
+class YFinanceBarsSource(DataSource):
     """
-    Half-open intervals: [cstart, cend)
-    """
-    out = []
-    cur = start
-    step = pd.Timedelta(days=chunk_days)
-    while cur < end:
-        nxt = min(cur + step, end)
-        out.append((cur, nxt))
-        cur = nxt
-    return out
+    Single-ticker yfinance fetcher.
 
-
-def _fetch_one_chunk(
-    ticker: str,
-    cstart: pd.Timestamp,
-    cend: pd.Timestamp,
-    interval: str,
-    retries: int = 3,
-    backoff: float = 1.5,
-) -> pd.DataFrame:
-    """
-    Fetch a single ticker for a single chunk. Returns tidy: timestamp,ticker,close
-    Uses yf.download with retries to handle Yahoo index flakiness (e.g. ^VIX).
+    fetch(): returns concatenated raw chunks (index not assumed datetime)
+    standardize(): enforces canonical tidy schema (no pivot):
+        timestamp, ticker, open, high, low, close, volume (+ optional extras)
     """
 
-    last_err = None
+    def __init__(self, cfg: Mapping[str, Any] | None = None):
+        super().__init__(cfg=cfg)
+   
+        self.interval = str(cfg.get("interval", "1d"))
+        self.chunk_size_days = int(cfg.get("chunk_size_days", 120))
+        self.retries = int(cfg.get("retries", 3))
+        self.backoff = float(cfg.get("backoff", 1.5))
+        self.auto_adjust = bool(cfg.get("auto_adjust", True))
+        self.actions = bool(cfg.get("actions", False))  # optional
 
-    for attempt in range(retries):
-        try:
-            df = yf.download(
-                tickers=ticker,
-                start=cstart.tz_convert(None),
-                end=cend.tz_convert(None),
-                interval=interval,
-                auto_adjust=True,
-                actions=False,
-                progress=False,
-                threads=False,
-                group_by="column",
-            )
+    def fetch(self, ticker: str, start: DateLike, end: DateLike) -> pd.DataFrame:
+        ticker = str(ticker).strip()
+        if not ticker:
+            return pd.DataFrame()
 
-            # Yahoo sometimes returns empty df without raising
-            if df is None or df.empty:
-                raise RuntimeError(f"Empty dataframe for {ticker}")
+        start_ts, end_ts = self._normalize_utc_range(start, end)
+        chunks = self.chunk_range(start_ts, end_ts, chunk_days=self.chunk_size_days)
 
-            df = df.copy()
-            df.index = pd.to_datetime(df.index, utc=True)
-
-            # Defensive close column handling
-            if "Close" not in df.columns:
-                close_col = next(
-                    (c for c in df.columns if str(c).lower() == "close"), None
-                )
-                if close_col is None:
-                    raise RuntimeError(f"No Close column for {ticker}")
-                df.rename(columns={close_col: "Close"}, inplace=True)
-
-            tidy = (
-                df[["Close"]]
-                .rename(columns={"Close": "close"})
-                .reset_index()
-            )
-            tidy.columns = ["timestamp", "close"]
-            tidy["ticker"] = ticker
-
-            return tidy[["timestamp", "ticker", "close"]]
-
-        except KeyError as e:
-            # yfinance Yahoo index failure (KeyError('chart'))
-            last_err = e
-        except Exception as e:
-            last_err = e
-
-        # Exponential backoff
-        time.sleep(backoff * (2 ** attempt))
-
-    # Final fallback: return empty tidy frame (consistent with your pipeline)
-    return pd.DataFrame(columns=["timestamp", "ticker", "close"])
-
-
-def _repair_split_like_jumps(prices: pd.Series, max_abs_logret: float = 0.4) -> pd.Series:
-    """
-    Repairs split/adjustment glitches by rescaling the *post-jump* segment.
-    For ETFs, a single-bar +/-40% is almost surely a data issue.
-    """
-    s = prices.dropna().copy()
-    if s.empty or len(s) < 3:
-        return prices
-
-    lr = np.log(s).diff()
-    bad = lr.abs() > max_abs_logret
-    if not bad.any():
-        return prices
-
-    fixed = prices.copy()
-    bad_times = lr.index[bad]
-
-    for ts in bad_times:
-        loc = s.index.get_loc(ts)
-        if loc == 0:
-            continue
-        prev_ts = s.index[loc - 1]
-        factor = s.loc[prev_ts] / s.loc[ts]
-        fixed.loc[fixed.index >= ts] = fixed.loc[fixed.index >= ts] * factor
-
-    return fixed
-
-
-def fetch(
-    tickers: Union[str, Sequence[str]],
-    start: DateLike,
-    end: DateLike,
-    interval: str = "60m",
-    chunk_size_days: int = 30,
-    repair_jumps: bool = True,
-    max_abs_logret: float = 0.4,
-) -> pd.DataFrame:
-    """
-    Robust multi-ticker intraday fetch (looped per ticker + chunked).
-
-    Returns tidy DataFrame with columns: [timestamp, ticker, close].
-    """
-    if isinstance(tickers, str):
-        tickers = [t.strip() for t in tickers.replace(",", " ").split() if t.strip()]
-    tickers = list(tickers)
-
-    start_ts, end_ts = _normalize_range(start, end)
-    chunks = _chunks(start_ts, end_ts, chunk_days=chunk_size_days)
-
-    pieces: List[pd.DataFrame] = []
-
-    for ticker in tickers:
-        t_pieces: List[pd.DataFrame] = []
-
+        pieces: list[pd.DataFrame] = []
         for cstart, cend in chunks:
-            tidy = _fetch_one_chunk(ticker, cstart, cend, interval=interval)
-            if tidy.empty:
+            raw_piece = self._fetch_one_chunk(ticker=ticker, cstart=cstart, cend=cend)
+            if raw_piece is None or raw_piece.empty:
                 continue
+            pieces.append(raw_piece)
 
-            # enforce half-open trimming [cstart, cend)
-            tidy = tidy[(tidy["timestamp"] >= cstart) & (tidy["timestamp"] < cend)]
-            t_pieces.append(tidy)
+        if not pieces:
+            return pd.DataFrame()
 
-        if not t_pieces:
-            continue
+        # No assumptions here: just concatenate
+        return pd.concat(pieces, ignore_index=True)
 
-        tdf = (
-            pd.concat(t_pieces, ignore_index=True)
-              .sort_values("timestamp")
-              .drop_duplicates(["timestamp"], keep="last")
+    def standardize(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Make canonical tidy schema from raw yfinance output.
+        - does NOT assume index is datetime
+        - flattens MultiIndex columns
+        - renames timestamp + OHLCV
+        - parses timestamp UTC
+        - sorts + drops duplicates on (ticker, timestamp)
+        """
+        if df is None or df.empty:
+            return pd.DataFrame(columns=self._base_cols())
+
+        df = df.copy()
+
+        # ---- flatten columns if MultiIndex ----
+        if isinstance(df.columns, pd.MultiIndex):
+            # keep the last level; preserves Open/High/Low/Close/Volume
+            df.columns = [str(c[0]) for c in df.columns]
+
+        # ---- find timestamp column ----
+        # yfinance reset_index commonly yields "Date" or "Datetime" (or sometimes "index")
+        ts_col = None
+        for cand in ("timestamp", "Datetime", "Date", "index"):
+            if cand in df.columns:
+                ts_col = cand
+                break
+        if ts_col is None:
+            # fallback: first column is probably the index column from reset_index()
+            ts_col = df.columns[0]
+
+        if ts_col != "timestamp":
+            df = df.rename(columns={ts_col: "timestamp"})
+
+        # ticker column: in our pipeline we add it in _fetch_one_chunk
+        if "ticker" not in df.columns:
+            raise ValueError("yfinance: missing 'ticker' column (expected added in fetch)")
+
+        # ---- rename Yahoo columns -> canonical ----
+        rename = {
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Adj Close": "adj_close",
+            "Volume": "volume",
+            "Dividends": "dividends",
+            "Stock Splits": "stock_splits",
+        }
+        df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+
+        # ---- ensure required cols exist ----
+        for c in self._base_cols():
+            if c not in df.columns:
+                df[c] = pd.NA
+
+        # ---- parse + coerce types ----
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+        df["ticker"] = df["ticker"].astype(str)
+
+        for c in ["open", "high", "low", "close", "volume"]:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        for c in ["adj_close", "dividends", "stock_splits"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        # ---- canonical ordering + dedup ----
+        df = (
+            df.dropna(subset=["timestamp", "ticker"])
+              .sort_values(["ticker", "timestamp"])
+              .drop_duplicates(["ticker", "timestamp"], keep="last")
+              .reset_index(drop=True)
         )
 
-        # optional repair for split-like glitches
-        if repair_jumps:
-            s = tdf.set_index("timestamp")["close"]
-            s_fixed = _repair_split_like_jumps(s, max_abs_logret=max_abs_logret)
-            tdf = s_fixed.reset_index()
-            tdf["ticker"] = ticker
-            tdf = tdf[["timestamp", "ticker", "close"]]
+        # keep base cols + any optional extras that exist
+        base = self._base_cols()
+        extras = [c for c in ["adj_close", "dividends", "stock_splits"] if c in df.columns]
+        return df[base + extras]
 
-        pieces.append(tdf)
+    def validate(self, df: pd.DataFrame) -> None:
+        if df is None or not isinstance(df, pd.DataFrame):
+            raise ValueError("yfinance: df must be a DataFrame")
+        if df.empty:
+            raise ValueError("yfinance: DataFrame is empty")
 
-    if not pieces:
-        return pd.DataFrame(columns=["timestamp", "ticker", "close"])
+        required = set(self._base_cols())
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(f"yfinance: missing columns: {sorted(missing)}")
 
-    out = (
-        pd.concat(pieces, ignore_index=True)
-          .sort_values(["ticker", "timestamp"])
-          .drop_duplicates(["ticker", "timestamp"], keep="last")
-          .reset_index(drop=True)
-    )
+        ts = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+        if ts.isna().any():
+            raise ValueError("yfinance: timestamp contains NaT after parsing")
 
-    return out
+        if df["ticker"].nunique() != 1:
+            raise ValueError("yfinance: expected a single ticker")
 
+        for c in ["open", "high", "low", "close", "volume"]:
+            if not pd.api.types.is_numeric_dtype(df[c]):
+                raise ValueError(f"yfinance: {c} must be numeric")
 
+        for c in ["open", "high", "low", "close"]:
+            if (df[c].dropna() <= 0).any():
+                raise ValueError(f"yfinance: found non-positive values in {c}")
+        if (df["volume"].dropna() < 0).any():
+            raise ValueError("yfinance: found negative volume")
 
-def standardize(df: pd.DataFrame) -> pd.DataFrame:
-    
+    # ----------------------------
+    # Internal
+    # ----------------------------
 
-    df = df.copy()
+    def _fetch_one_chunk(self, *, ticker: str, cstart: pd.Timestamp, cend: pd.Timestamp) -> pd.DataFrame:
+        for attempt in range(self.retries):
+            try:
+                raw = yf.download(
+                    tickers=ticker,
+                    start=cstart.tz_convert(None),
+                    end=cend.tz_convert(None),
+                    interval=self.interval,
+                    auto_adjust=self.auto_adjust,
+                    actions=self.actions,
+                    progress=False,
+                    threads=False,
+                    group_by="column",
+                )
 
-    # Ensure timestamp is datetime + UTC
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+                if raw is None or raw.empty:
+                    raise RuntimeError(f"Empty dataframe for {ticker}")
 
-    wide = (
-        df.pivot_table(
-            index="timestamp",
-            columns="ticker",
-            values="close",
-            aggfunc="last",   # safe if duplicates exist
-        )
-        .sort_index()
-    )
+                raw = raw.copy()
 
-    return wide
+                # Important: do NOT assume index type; just reset to a column
+                out = raw.reset_index()
+                out["ticker"] = ticker
+                return out
 
-def validate(df: pd.DataFrame) -> None:
-    if df is None or not isinstance(df, pd.DataFrame):
-        raise ValueError("yfinance: df must be a DataFrame")
-    if df.empty:
-        raise ValueError("yfinance: DataFrame is empty")
+            except Exception:
+                time.sleep(self.backoff * (2**attempt))
 
-    # Index checks
-    if not isinstance(df.index, pd.DatetimeIndex):
-        raise ValueError("yfinance: index must be a DatetimeIndex (timestamp)")
-    if df.index.hasnans:
-        raise ValueError("yfinance: index contains NaNs")
-    if df.index.duplicated().any():
-        raise ValueError("yfinance: duplicate timestamps in index")
-    if not df.index.is_monotonic_increasing:
-        raise ValueError("yfinance: timestamps must be sorted increasing")
+        return pd.DataFrame()
 
-    # Column checks
-    if isinstance(df.columns, pd.MultiIndex):
-        raise ValueError("yfinance: columns should not be MultiIndex after pivot")
-    if df.shape[1] == 0:
-        raise ValueError("yfinance: no ticker columns found")
-    if df.columns.duplicated().any():
-        raise ValueError("yfinance: duplicate ticker columns found")
+    @staticmethod
+    def chunk_range(start: pd.Timestamp, end: pd.Timestamp, *, chunk_days: int) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+        out: list[tuple[pd.Timestamp, pd.Timestamp]] = []
+        cur = start
+        step = pd.Timedelta(days=chunk_days)
+        while cur < end:
+            nxt = min(cur + step, end)
+            out.append((cur, nxt))
+            cur = nxt
+        return out
 
-    # Data checks
-    if df.isna().all().any():
-        bad = df.columns[df.isna().all()].tolist()
-        raise ValueError(f"yfinance: tickers entirely NaN: {bad}")
+    @staticmethod
+    def _normalize_utc_range(start: DateLike, end: DateLike) -> tuple[pd.Timestamp, pd.Timestamp]:
+        start_ts = pd.to_datetime(start, utc=True)
+        end_ts = pd.to_datetime(end, utc=True)
+        if end_ts == end_ts.normalize():
+            end_ts = end_ts + pd.Timedelta(days=1)
+        return start_ts, end_ts
 
-    # Ensure numeric (close should be numeric)
-    non_numeric = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
-    if non_numeric:
-        raise ValueError(f"yfinance: non-numeric ticker columns: {non_numeric}")
-
-    # Optional plausibility: prices should be > 0 whenever present
-    if (df.dropna(how="all").le(0)).any().any():
-        raise ValueError("yfinance: found non-positive prices")
-
-if __name__ == "__main__":
-
-    features = ["SPY", "XLE"]    
-    start = "2025-12-12"
-    end = "2025-12-20"
-
-    df = fetch(features, start, end)
-    df = standardize(df)
-
-    validate(df)
-    print(df.head())
+    @staticmethod
+    def _base_cols() -> list[str]:
+        return ["timestamp", "ticker", "open", "high", "low", "close", "volume"]

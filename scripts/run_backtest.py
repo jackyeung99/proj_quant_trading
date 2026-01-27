@@ -34,7 +34,6 @@ def run_spec(cfg: dict, wf: Optional[WalkForwardSpec], store: ArtifactsStore, bt
     store.write_run(result.meta, result.timeseries, result.metrics)
     print("Wrote run:", result.meta.run_id, "|", spec.strategy_name, "|", spec.universe, "| tag:", spec.tag)
 
-
 def main():
     # --- storage ---
     storage = LocalStorage(base_dir=Path("."))
@@ -53,61 +52,27 @@ def main():
     base_buyhold = load_yaml("configs/strategies/run_buyhold.yaml")
     base_state = load_yaml("configs/strategies/run_state.yaml")
 
-    # --- common overrides ---
-    common_spy = {
-        "universe": "SPY",
-        "assets": ["ret_spy"],
-        "tag": "sweep_spy",
-    }
+    # --- common overrides (XLE only) ---
     common_xle = {
         "universe": "XLE",
         "assets": ["ret_xle"],
         "tag": "sweep_xle",
     }
 
-    # --- BuyHold variants ---
-    # You can keep this as a grid (e.g., different params), but for now it's just one run each.
-    buyhold_variants = [
-        ("SPY", common_spy),
-        ("XLE", common_xle),
-    ]
+    # --- BuyHold (XLE only) ---
+    cfg = deep_update(base_buyhold, common_xle)
+    cfg.setdefault("tag", "sweep_xle_buyhold")
+    run_spec(cfg, wf, store, bt)
 
-    # --- StateSignal variants ---
-    xle_state_vars = ["rv_idio", "rv_spy", "rv_xle", "macro_log_OVXCLS", "macro_log_VIXCLS","macro_EFFR", "macro_DGS2", "macro_DGS10", "wx_weather_iforest_score"]
-    state_variants_xle = []
+    # --- StateSignal (XLE only) ---
+    xle_state_vars = ["rv_idio", "rv_spy", "rv_xle"]
     for state_var in xle_state_vars:
-        state_variants_xle.append({
+        v = {
             "universe": "XLE",
             "assets": ["ret_xle"],
             "params": {"gamma": 5, "lag_state": 1, "state_var": state_var},
             "tag": f"xle_state_{state_var}",
-        })
-
-    spy_state_vars = ["rv_xle", "macro_log_OVXCLS", "macro_log_VIXCLS"]
-    state_variants_spy = []
-    for state_var in spy_state_vars:
-        state_variants_spy.append({
-            "universe": "SPY",
-            "assets": ["ret_spy"],
-            "params": {"gamma": 5, "lag_state": 1, "state_var": state_var},
-            "tag": f"spy_state_{state_var}",
-        })
-
-    # --- run them ---
-    # BuyHold (SPY + XLE)
-    for universe, common in buyhold_variants:
-        cfg = deep_update(base_buyhold, common)
-        # ensure tag exists and is unique-ish per universe
-        cfg.setdefault("tag", f"sweep_{universe.lower()}_buyhold")
-        run_spec(cfg, wf, store, bt)
-
-    # XLE state
-    for v in state_variants_xle:
-        cfg = deep_update(base_state, v)
-        run_spec(cfg, wf, store, bt)
-
-    # SPY state
-    for v in state_variants_spy:
+        }
         cfg = deep_update(base_state, v)
         run_spec(cfg, wf, store, bt)
 

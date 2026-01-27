@@ -12,8 +12,8 @@ from qbt.backtesting.splitter import iter_walk_forward_splits
 from qbt.execution.simulator import simulate_strategy_execution
 from qbt.data.dataloader import DataAdapter, DefaultDataAdapter
 
-from qbt.strategies.registry import create_strategy, available_strategies
-from qbt.strategies.base import Strategy
+from qbt.strategies.strategy_registry import create_strategy, available_strategies
+from qbt.strategies.strategy_base import Strategy
 
 from qbt.core.logging import get_logger
 

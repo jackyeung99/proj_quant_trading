@@ -1,5 +1,5 @@
-from qbt.strategies.base import Strategy
-from qbt.strategies.registry import register_strategy
+from qbt.strategies.strategy_base import Strategy
+from qbt.strategies.strategy_registry import register_strategy
 from qbt.core.types import RunSpec, ModelInputs
 import pandas as pd
 import numpy as np

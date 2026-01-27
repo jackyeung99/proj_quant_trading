@@ -1,217 +1,274 @@
+from __future__ import annotations
+
 import os
 import time as _time
-import requests
+from dataclasses import dataclass
+from typing import Optional, Sequence, Union, Mapping, Any
+
+from qbt.data.sources.source_registry import register_source
+from qbt.data.sources.source_base import DataSource
+
 import pandas as pd
+import requests
+
 from dotenv import load_dotenv
-from pathlib import Path
+load_dotenv()
 
-from proj.utils.paths import find_project_root
-from proj.data.sources.yfin import standardize, validate
-from proj.data.storage import make_storage
-from proj.data.ingestion_state import get_last_available_date, compute_fetch_window, update_state
-from proj.data.sources import yfin, fred, weather
-from proj.data.storage import Storage
+# If you want to keep env loading in the entrypoint, DO NOT do it in the class.
+# Keep the class pure and pass keys in, or read env inside a tiny helper in __main__.
 
-from proj.data.merge_helpers import merge_and_dedup
+DateLike = Union[str, pd.Timestamp]
 
 
-    ##  ONE TIME SCRIPT: get high frequency intraday bars
+# ----------------------------
+# Alpaca 15m Bars (tidy, no pivot)
+# ----------------------------
 
-
-ROOT = find_project_root()  
-load_dotenv(ROOT / ".env")
-
-ALPACA_DATA_BASE = "https://data.alpaca.markets"
-
-
-def _alpaca_headers() -> dict:
-    api_key = os.getenv("ALPACA_API_KEY")
-    api_secret = os.getenv("ALPACA_API_SECRET")
-
-    if not api_key or not api_secret:
-        raise RuntimeError(
-            "Missing ALPACA_API_KEY / ALPACA_API_SECRET in .env file"
-        )
-
-    return {
-        "APCA-API-KEY-ID": api_key,
-        "APCA-API-SECRET-KEY": api_secret,
-    }
-
-
-def fetch_alpaca_bars_15m(
-    symbols: list[str],
-    start: str,
-    end: str,
-    feed: str = "iex",           # "iex" = free tier, "sip" = paid
-    adjustment: str = "split",
-    limit: int = 10000,
-    sleep_s: float = 0.25,
-) -> dict[str, pd.DataFrame]:
+@register_source('alpaca')
+class AlpacaBarsSource(DataSource):
     """
-    Pull historical 15-minute OHLCV bars using:
-      GET /v2/stocks/bars
+    Fetch historical 15-minute OHLCV bars from Alpaca Data API.
+
+    Output: TIDY (long) DataFrame:
+      columns: [timestamp, ticker, open, high, low, close, volume, (optional VWAP), (optional Trades)]
+    No pivoting.
+
+    Notes:
+    - feed="iex" is free tier; "sip" is paid.
+    - adjustment can be "raw", "split", "dividend", "all" depending on your plan.
+    - Alpaca returns paginated results; this class handles next_page_token.
     """
-    url = f"{ALPACA_DATA_BASE}/v2/stocks/bars"
-    headers = _alpaca_headers()
-
-    params = {
-        "symbols": ",".join(symbols),
-        "timeframe": "15Min",     # native 15-minute bars
-        "start": start,           # ISO-8601 UTC
-        "end": end,
-        "feed": feed,
-        "adjustment": adjustment,
-        "limit": limit,
-    }
-
-    by_symbol = {s: [] for s in symbols}
-    page_token = None
-
-    while True:
-        if page_token:
-            params["page_token"] = page_token
-        else:
-            params.pop("page_token", None)
-
-        r = requests.get(url, headers=headers, params=params, timeout=60)
-        if r.status_code != 200:
-            raise RuntimeError(f"Alpaca error {r.status_code}: {r.text[:300]}")
-
-        js = r.json()
-        bars = js.get("bars", {})
-
-        for sym, rows in bars.items():
-            by_symbol[sym].extend(rows)
-
-        page_token = js.get("next_page_token")
-        if not page_token:
-            break
-
-        if sleep_s:
-            _time.sleep(sleep_s)
-
-    out = {}
-    for sym, rows in by_symbol.items():
-        if not rows:
-            out[sym] = pd.DataFrame()
-            continue
-
-        df = pd.DataFrame(rows)
-        df["timestamp"] = pd.to_datetime(df["t"], utc=True)
-
-        rename = {
-            "o": "open",
-            "h": "high",
-            "l": "low",
-            "c": "close",
-            "v": "volume",
-        }
-        if "vw" in df.columns:
-            rename["vw"] = "VWAP"
-        if "n" in df.columns:
-            rename["n"] = "Trades"
-
-        df = (
-            df.rename(columns=rename)
-              .set_index("timestamp")
-              .sort_index()
-        )
-
-        keep = ["open", "high", "low", "close", "volume"]
-        if "VWAP" in df.columns:
-            keep.append("VWAP")
-        if "Trades" in df.columns:
-            keep.append("Trades")
-
-        out[sym] = df[keep]
-
-    return out
 
 
-def fetch(tickers, start, end):
-    # Call ONCE with all tickers (best)
-    data_dict = fetch_alpaca_bars_15m(
-        symbols=tickers,
-        start=start,
-        end=end,
-        feed="iex",
-        adjustment="all",
-    )
 
-    frames = []
-    for sym, df in data_dict.items():
-        if df is None or df.empty:
-            continue
+    def __init__(
+        self,
+        cfg: Mapping[str, Any] | None = None,
+        base_url: str = "https://data.alpaca.markets",
+        timeout_s: int = 60,
+    ):
+        super().__init__(cfg=cfg)
 
-        tmp = df.copy()
-        tmp["ticker"] = sym
-        tmp = tmp.reset_index()  # brings timestamp index back as a column named "timestamp"
-        frames.append(tmp)
+        self.base_url = base_url
+        self.timeout_s = int(timeout_s)
 
-    if not frames:
-        return pd.DataFrame(columns=["timestamp", "ticker", "open", "high", "low", "close", "volume"])
+        # Allow injection; fall back to env (cloud-friendly)
+        self.api_key = cfg.get( 
+                'api_key',
+                os.getenv("ALPACA_API_KEY")
+                )
+        self.api_secret = cfg.get(
+            'api_secret',
+             os.getenv("ALPACA_API_SECRET")
+             )
+        if not self.api_key or not self.api_secret:
+            raise RuntimeError("Missing Alpaca credentials (api_key/api_secret or env vars)")
 
-    out = (
-        pd.concat(frames, ignore_index=True)
-          .sort_values(["ticker", "timestamp"])
-          .drop_duplicates(["ticker", "timestamp"], keep="last")
-          .reset_index(drop=True)
-    )
+        # defaults (cfg can override)
 
-    return out
+        self.feed = str(cfg.get("feed", "iex"))
+        self.adjustment = str(cfg.get("adjustment", "all"))
+        self.limit = int(cfg.get("limit", 10000))
+        self.sleep_s = float(cfg.get("sleep_s", 0.25))
+        self.interval = str(cfg.get('interval', '15Min'))
 
 
-if __name__ == "__main__":
+    def fetch(
+        self,
+        ticker: str,
+        start: DateLike,
+        end: DateLike,
+        ) -> pd.DataFrame:
+            if not ticker or not str(ticker).strip():
+                return pd.DataFrame(columns=self._base_cols())
 
-    
-    symbols = ["SPY", "XLE"]
+            ticker = str(ticker).strip()
 
-    start = "2021-01-01T00:00:00Z"
-    # start = "2025-11-01T00:00:00Z"
-    end   = "2026-01-01T00:00:00Z"
+            # allow overrides from kwargs
+            
 
-    data = fetch(symbols, start, end)
-    new_df = standardize(data)
-    validate(new_df)
-    print(new_df)
-    
-    #merge/write/state
-    cfg = {"storage":
-            {"backend": "local",
-                "base_dir": "data"}
+            start_ts, end_ts = self._normalize_utc_range(start, end)
+
+            url = f"{self.base_url}/v2/stocks/bars"
+            headers = self._headers()
+
+            params = {
+                "symbols": ticker,
+                "timeframe": self.interval,
+                "start": start_ts.isoformat(),
+                "end": end_ts.isoformat(),
+                "feed": self.feed,
+                "adjustment": self.adjustment,
+                "limit": self.limit,
             }
 
-    store_key = "bronze/equities.parquet"
-    storage = make_storage(cfg)
-    if storage.exists(store_key):
-        old_df = storage.read_parquet(store_key)
-        merged = merge_and_dedup(old_df, new_df)
-    else:
-        merged = new_df
+            rows: list[dict] = []
+            page_token: Optional[str] = None
 
-    storage.write_parquet(merged, store_key)
+            while True:
+                if page_token:
+                    params["page_token"] = page_token
+                else:
+                    params.pop("page_token", None)
 
-    start = pd.Timestamp(start)
-    end = pd.Timestamp(end)
+                r = requests.get(url, headers=headers, params=params, timeout=self.timeout_s)
+                if r.status_code != 200:
+                    raise RuntimeError(f"Alpaca error {r.status_code}: {r.text[:300]}")
 
-    na_summary = (
-        merged.isna()
-        .agg(["sum", "mean"])
-        .T
-        .rename(columns={"sum": "n_missing", "mean": "pct_missing"})
-    )
+                js = r.json()
+                bars = js.get("bars", {}) or {}
 
-    na_summary["pct_missing"] *= 100
-    print(na_summary.sort_values("pct_missing", ascending=False))
-    update_state(
-        storage,
-        store_key,
-        merged,
-        pull_start=start,
-        pull_end=end,
-        meta = None
-    )
+                sym_rows = bars.get(ticker, [])
+                rows.extend(sym_rows)
+
+                page_token = js.get("next_page_token")
+                if not page_token:
+                    break
+
+                if self.sleep_s:
+                    _time.sleep(self.sleep_s)
+
+            if not rows:
+                return pd.DataFrame(columns=self._base_cols())
+
+            df = pd.DataFrame(rows)
+
+            # Alpaca schema mapping
+            df["timestamp"] = pd.to_datetime(df["t"], utc=True, errors="coerce")
+            df["ticker"] = ticker
+
+            rename = {
+                "o": "open",
+                "h": "high",
+                "l": "low",
+                "c": "close",
+                "v": "volume",
+                "vw": "vwap",
+                "n": "trades",
+            }
+            df = df.rename(columns=rename)
+
+            keep = ["timestamp", "ticker", "open", "high", "low", "close", "volume"]
+            if "vwap" in df.columns:
+                keep.append("vwap")
+            if "trades" in df.columns:
+                keep.append("trades")
+
+            df = df[keep]
+            print(df.columns)
+            out = (
+                df.dropna(subset=["timestamp"])
+                .sort_values(["timestamp"])
+                .drop_duplicates(["timestamp"], keep="last")
+                .reset_index(drop=True)
+            )
+
+            return out
+
+    def standardize(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Canonical tidy schema + dtypes.
+        No pivoting, no index requirement.
+        """
+        if df is None:
+            return pd.DataFrame(columns=self._base_cols())
+
+        df = df.copy()
+
+        # Ensure required columns exist (create if missing)
+        for c in self._base_cols():
+            if c not in df.columns:
+                df[c] = pd.NA
+
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+        df["ticker"] = df["ticker"].astype(str)
+
+        # enforce numeric
+        for c in ["open", "high", "low", "close", "volume"]:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        # optional fields
+        if "vwap" in df.columns:
+            df["vwap"] = pd.to_numeric(df["vwap"], errors="coerce")
+        if "trades" in df.columns:
+            df["trades"] = pd.to_numeric(df["trades"], errors="coerce")
+
+        df = (
+            df.dropna(subset=["timestamp", "ticker"])
+            .sort_values(["ticker", "timestamp"])
+            .drop_duplicates(["ticker", "timestamp"], keep="last")
+            .reset_index(drop=True)
+        )
+        return df
+
+    def validate(self, df: pd.DataFrame) -> None:
+        """
+        Validate tidy OHLCV bars (no pivot assumptions).
+        """
+        if df is None or not isinstance(df, pd.DataFrame):
+            raise ValueError("alpaca: df must be a DataFrame")
+        if df.empty:
+            raise ValueError("alpaca: DataFrame is empty")
+
+        required = {"timestamp", "ticker", "open", "high", "low", "close", "volume"}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(f"alpaca: missing columns: {sorted(missing)}")
+
+        ts = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+        if ts.isna().any():
+            raise ValueError("alpaca: timestamp contains NaT after parsing")
+
+        if df["ticker"].isna().any():
+            raise ValueError("alpaca: ticker contains NaNs")
+
+        # monotonic per ticker (after sorting)
+        s = df.sort_values(["ticker", "timestamp"])
+        if s.groupby("ticker")["timestamp"].apply(lambda x: x.is_monotonic_increasing).eq(False).any():
+            raise ValueError("alpaca: timestamps must be non-decreasing within each ticker")
+
+        # numeric checks
+        for c in ["open", "high", "low", "close", "volume"]:
+            if not pd.api.types.is_numeric_dtype(df[c]):
+                raise ValueError(f"alpaca: {c} must be numeric")
+
+        # plausibility checks (allow NaNs but not non-positive where present)
+        for c in ["open", "high", "low", "close"]:
+            if (df[c].dropna() <= 0).any():
+                raise ValueError(f"alpaca: found non-positive values in {c}")
+
+        if (df["volume"].dropna() < 0).any():
+            raise ValueError("alpaca: found negative volume")
+
+        # OHLC sanity where all present
+        ohlc = df[["open", "high", "low", "close"]].dropna()
+        if not ohlc.empty:
+            if (ohlc["high"] < ohlc[["open", "close", "low"]].max(axis=1)).any():
+                raise ValueError("alpaca: high is less than max(open, close, low) for some rows")
+            if (ohlc["low"] > ohlc[["open", "close", "high"]].min(axis=1)).any():
+                raise ValueError("alpaca: low is greater than min(open, close, high) for some rows")
+
+    # ----------------------------
+    # Internals
+    # ----------------------------
+
+    def _headers(self) -> dict:
+        if not self.api_key or not self.api_secret:
+            raise RuntimeError("Missing Alpaca API key/secret")
+        return {
+            "APCA-API-KEY-ID": self.api_key,
+            "APCA-API-SECRET-KEY": self.api_secret,
+        }
+
+    @staticmethod
+    def _base_cols() -> list[str]:
+        return ["timestamp", "ticker", "open", "high", "low", "close", "volume"]
 
 
-
+    @staticmethod
+    def _normalize_utc_range(start: DateLike, end: DateLike) -> tuple[pd.Timestamp, pd.Timestamp]:
+        start_ts = pd.to_datetime(start, utc=True)
+        end_ts = pd.to_datetime(end, utc=True)
+        if end_ts == end_ts.normalize():
+            end_ts = end_ts + pd.Timedelta(days=1)
+        return start_ts, end_ts

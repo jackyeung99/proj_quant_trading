@@ -1,7 +1,7 @@
 # qbt/strategies/registry.py
 from __future__ import annotations
 from typing import Callable, Dict
-from qbt.strategies.base import Strategy
+from qbt.strategies.strategy_base import Strategy
 
 _REGISTRY: Dict[str, Callable[[], Strategy]] = {}
 _LOADED = False

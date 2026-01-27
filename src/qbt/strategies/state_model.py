@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 
 from qbt.core.types import RunSpec, ModelInputs
-from qbt.strategies.base import Strategy
-from qbt.strategies.registry import register_strategy
+from qbt.strategies.strategy_base import Strategy
+from qbt.strategies.strategy_registry import register_strategy
 
 from qbt.metrics.summary import _sharpe
 

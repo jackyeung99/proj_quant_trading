@@ -7,8 +7,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from qbt.core.types import RunSpec, ModelInputs
-from qbt.strategies.base import Strategy
-from qbt.strategies.registry import register_strategy
+from qbt.strategies.strategy_base import Strategy
+from qbt.strategies.strategy_registry import register_strategy
 from qbt.core.logging import get_logger
 
 logging = get_logger(__name__)
