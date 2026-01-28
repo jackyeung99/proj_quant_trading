@@ -5,7 +5,7 @@ import math
 from typing import Iterator, Tuple, Union
 import pandas as pd
 
-from qbt.core.types import SizeLike, WalkForwardSpec
+from qbt.core.types import SizeLike, BacktestSpec
 
 
 def _parse_size(value: SizeLike, n: int, *, name: str, allow_none: bool = True) -> int | None:
@@ -57,29 +57,31 @@ def _parse_size(value: SizeLike, n: int, *, name: str, allow_none: bool = True) 
     raise TypeError(f"{name} must be int, float, str, or None; got {type(value).__name__}")
 
 
-def iter_walk_forward_splits(index: pd.Index, wf: WalkForwardSpec) -> Iterator[Tuple[pd.Index, pd.Index]]:
+def iter_walk_forward_splits(
+    index: pd.Index,
+    bt: BacktestSpec,
+) -> Iterator[Tuple[pd.Index, pd.Index]]:
+
     n = len(index)
     if n == 0:
         return
 
-    train = _parse_size(wf.train_size, n, name="train_size", allow_none=False)
-    test = _parse_size(wf.test_size, n, name="test_size", allow_none=False)
-    step = _parse_size(wf.step_size, n, name="step_size", allow_none=True)
-    min_train = _parse_size(wf.min_train, n, name="min_train", allow_none=True)
+    train = _parse_size(bt.train_size, n, name="train_size", allow_none=False)
+    test = _parse_size(bt.test_size, n, name="test_size", allow_none=False)
+    min_train = _parse_size(bt.min_train, n, name="min_train", allow_none=True)
 
-    # Defaults after parsing
-    if step is None:
-        step = test
+    # defaults
     if min_train is None:
         min_train = train
 
+    step = 1  
+
     if train + test > n:
-        # Not enough data for even one split
         return
 
     start = 0
     while True:
-        if wf.expanding:
+        if bt.expanding:
             train_start = 0
             train_end = start + train
         else:
@@ -93,6 +95,9 @@ def iter_walk_forward_splits(index: pd.Index, wf: WalkForwardSpec) -> Iterator[T
             break
 
         if (train_end - train_start) >= min_train:
-            yield index[train_start:train_end], index[test_start:test_end]
+            yield (
+                index[train_start:train_end],
+                index[test_start:test_end],
+            )
 
         start += step

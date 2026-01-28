@@ -1,17 +1,33 @@
+
 strategy_name: StateSignal
 universe: XLE
-data_path: data/processed/modeling_table.parquet
-date_col: timestamp
-assets: [ret_xle]
-weight_lag: 1
-tag: mvp
+tag: rv_regime_15m
+
+assets:
+  - XLE
+
+data:
+  interval: 15Min
+  tz: America/New_York
+  root: data/bronze
+  file_format: parquet
+  layout:
+    # maps to: data/freq=<bar>/ticker=<asset>.<ext>
+    interval_dir: true
+    filename: "bars.{ext}"
+  columns:
+    timestamp: timestamp
+    fields: [open, high, low, close, volume]
+
+features:
+  pipeline: intraday_ohlcv_v1
+  return_kind: log
+  rv_windows: [5, 20]
+  mom_windows: [20, 60]
+  # optional:
+  # feature_shift: 1         # enforce no-lookahead at the adapter level
+
 params:
-  state_var: rv_xle    
-  gamma: 5.0
-  min_frac: 0.10
-  lag_state: 1
-  w_min: 0.0
-  w_max: 1.0
-  ann_factor: 252
-
-
+  state_var: XLE_rvol
+  w_low: 0.0
+  w_high: 1.0

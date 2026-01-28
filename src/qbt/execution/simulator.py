@@ -8,7 +8,7 @@ def simulate_strategy_execution(
     returns: pd.DataFrame,          # [T x N] simple returns, columns=tickers
     weights: pd.DataFrame,          # [T x N] desired weights, columns=tickers
     weight_lag: int = 1,
-    costs_bps: float = 0.0,         # optional turnover cost in bps
+    transaction_cost_bps: float = 0.0,         # optional turnover cost in bps
     normalize: bool = False,        # if True, rescale weights to sum(abs)=1 each day
 ) -> pd.DataFrame:
     if not isinstance(returns, pd.DataFrame) or returns.empty:
@@ -41,9 +41,9 @@ def simulate_strategy_execution(
     asset_ret_gross = w_lagged.mul(r, axis=0)
 
     # --- simple transaction costs: bps * turnover ---
-    if costs_bps and costs_bps > 0:
+    if transaction_cost_bps and transaction_cost_bps > 0:
         turnover = w_lagged.diff().abs().sum(axis=1).fillna(0.0)
-        cost = (costs_bps / 1e4) * turnover  # bps -> decimal
+        cost = (transaction_cost_bps / 1e4) * turnover  # bps -> decimal
     else:
         turnover = pd.Series(0.0, index=idx, dtype=float)
         cost = pd.Series(0.0, index=idx, dtype=float)

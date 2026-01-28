@@ -1,4 +1,11 @@
-train_size: 0.6
-test_size: 0.2
-step_size: 0.1
-expanding: false
+weight_lag: 1
+rebalance: "D"
+train_freq: "D"
+transaction_cost_bps: 0.0
+
+# --- evaluation method (optional WF) ---
+use_walk_forward: True
+train_size: .6
+test_size:  .4
+min_train: 200
+expanding: False
