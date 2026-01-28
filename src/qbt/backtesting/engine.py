@@ -105,7 +105,7 @@ class BacktestEngine:
             bt=bt,
         )
 
-
+        print(w)
         ts_df = simulate_strategy_execution(
             inputs.ret,
             w,

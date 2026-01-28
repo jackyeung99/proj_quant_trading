@@ -20,7 +20,6 @@ class SVMStateSignalModel(Strategy):
         self.features_: list[str] = []
         self.w_low_: float = 0.0
         self.w_high_: float = 0.0
-        self.lag_state_: int = 1
         self.state_vars: list[str] = []
 
     def parse_params(self, spec: RunSpec) -> dict:
@@ -42,7 +41,6 @@ class SVMStateSignalModel(Strategy):
             "features": list(features),
             # threshold is a quantile (0..1) in your code
             "threshold": float(params.get("return_threshold", 0.7)),
-            "lag_state": int(params.get("lag_state", 1)),
             "gamma": float(params.get("gamma", 5.0)),
             "w_min": float(params.get("w_min", 0.0)),
             "w_max": float(params.get("w_max", 3.0)),
@@ -69,7 +67,7 @@ class SVMStateSignalModel(Strategy):
         r1 = r.iloc[:, 0].rename("ret")
 
         # lag features so features at t-1 predict ret regime at t
-        S = X.loc[:, self.state_vars].shift(self.lag_state_)
+        S = X.loc[:, self.state_vars]
 
         df = pd.concat([r1, S], axis=1)
         df = df.dropna(subset=["ret"] + self.state_vars)
@@ -112,7 +110,7 @@ class SVMStateSignalModel(Strategy):
         if missing:
             raise ValueError(f"Predict features missing columns: {missing}")
 
-        S = X.loc[:, self.features_].shift(self.lag_state_)
+        S = X.loc[:, self.features_]
 
         # Align output to the test ret index; if shift creates NaNs, weight=0 there
         S = S.reindex(inputs.ret.index)

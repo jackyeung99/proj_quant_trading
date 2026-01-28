@@ -21,7 +21,6 @@ class StateSignalModel(Strategy):
         self.tau_: float | None = None
         self.w_low_: float | None = None
         self.w_high_: float | None = None
-        self.lag_state_: int = 1
         self.state_var_: str | None = None
 
     def parse_params(self, spec: RunSpec) -> dict:
@@ -33,7 +32,6 @@ class StateSignalModel(Strategy):
 
         return {
             "state_var": state_var,
-            "lag_state": int(params.get("lag_state", 1)),
             "min_frac": float(params.get("min_frac", 0.10)),
             "ann_factor": int(params.get("ann_factor", 252)),
             "gamma": float(params.get("gamma", 5.0)),
@@ -52,7 +50,6 @@ class StateSignalModel(Strategy):
     def fit(self, inputs: ModelInputs, spec: RunSpec) -> None:
         p = self.parse_params(spec)
         self.state_var_ = p["state_var"]
-        self.lag_state_ = p["lag_state"]
 
         X = inputs.features.sort_index().copy()
         r = inputs.ret.sort_index()
@@ -65,7 +62,7 @@ class StateSignalModel(Strategy):
             raise ValueError("StateSignalModel expects inputs.ret to be [T x 1] for fitting.")
         r1 = r.iloc[:, 0]
 
-        S_used = X[self.state_var_].shift(self.lag_state_)
+        S_used = X[self.state_var_]
         df = pd.DataFrame({"S_used": S_used, "ret": r1}).dropna()
 
         if df.empty or len(df) < 20:
@@ -111,7 +108,7 @@ class StateSignalModel(Strategy):
         if state_var not in X.columns:
             raise ValueError(f"Features missing state_var '{state_var}'")
 
-        S_used = X[state_var].shift(self.lag_state_)
+        S_used = X[state_var]
 
         # 1 = high regime, 0 = low regime
         sig = (S_used > float(self.tau_)).astype(float)
