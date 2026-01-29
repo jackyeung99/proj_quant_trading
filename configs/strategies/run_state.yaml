@@ -24,10 +24,9 @@ features:
   return_kind: log
   rv_windows: [5, 20]
   mom_windows: [20, 60]
-  # optional:
-  # feature_shift: 1         # enforce no-lookahead at the adapter level
+
 
 params:
   state_var: XLE_rvol
-  w_low: 0.0
+  w_low: 0
   w_high: 1.0

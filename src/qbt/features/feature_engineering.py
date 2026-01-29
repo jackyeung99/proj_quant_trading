@@ -14,88 +14,130 @@ from qbt.features.feature_engineering import *
 
 
 def aggregate_intra_bars(
-    prices: pd.DataFrame,
+    wide: pd.DataFrame,
     *,
     freq: str = "1B",
-    cutoff_hour: float = 15.0,          # e.g. 15.0 -> day ends at 15:00
+    cutoff_hour: float = 15.0,
     return_kind: str = "log",
     tz: str | None = None,
+    open_field: str = "open",
+    close_field: str = "close",
 ) -> pd.DataFrame:
     """
-    Aggregate intraday bars to a lower frequency with a custom cutoff.
+    Aggregate intraday bars (wide) to a lower frequency with a custom cutoff.
 
-    Parameters
-    ----------
-    prices : DataFrame
-        Wide DataFrame indexed by tz-aware timestamps (bar CLOSE), columns=assets.
-        Must contain price levels (close). We'll infer open/close per period from prices.
-    freq : str
-        Resample frequency, usually "1D".
-    cutoff_hour : float
-        End-of-period cutoff hour in local time. Example: 15.0 means the "day"
-        runs from (prev day 15:15 .. current day 15:00) if 15m bars are close-stamped.
-    return_kind : str
-        "log" or "simple" intrabar returns.
-    tz : str | None
-        If given, convert/localize prices index to tz before resampling.
+    Accepts:
+      1) close-only wide:
+         index = tz-aware timestamps, columns = assets, values = close
+      2) OHLC wide (MultiIndex columns):
+         index = tz-aware timestamps, columns = (asset, field), field in {"open","close",...}
 
-    Returns
-    -------
-    DataFrame with MultiIndex columns (asset, metric):
+    Returns DataFrame with MultiIndex columns (asset, metric):
       open, close, ret, rvar, rvol, n_intra
     """
-    if not isinstance(prices.index, pd.DatetimeIndex):
-        raise ValueError("prices must be indexed by DatetimeIndex")
-    if prices.index.tz is None and tz is None:
-        raise ValueError("prices index must be tz-aware, or pass tz=... to localize.")
+    if not isinstance(wide.index, pd.DatetimeIndex):
+        raise ValueError("wide must be indexed by DatetimeIndex")
+
+    if wide.index.tz is None and tz is None:
+        raise ValueError("wide index must be tz-aware, or pass tz=... to localize.")
+
+    # normalize timezone
     if tz is not None:
-        prices = prices.tz_localize(tz) if prices.index.tz is None else prices.tz_convert(tz)
+        wide = wide.tz_localize(tz) if wide.index.tz is None else wide.tz_convert(tz)
 
-    prices = prices.sort_index()
+    wide = wide.sort_index()
 
-    # intrabar returns (aligned to bar close times)
-    r = compute_returns(prices, kind=return_kind)
+    # ----------------------------
+    # Extract per-asset intraday open/close series
+    # ----------------------------
+    if isinstance(wide.columns, pd.MultiIndex):
+        # Expect columns like (asset, field)
+        levels = wide.columns.names
+        # We assume level 0 = asset, level 1 = field (common in your code)
+        # If your ordering differs, you can reorder outside before calling.
+        fields = set(wide.columns.get_level_values(1))
 
-    # realized variance components
+        has_open = open_field in fields
+        has_close = close_field in fields
+
+        if not has_close:
+            raise ValueError(f"MultiIndex wide must contain field '{close_field}'.")
+
+        close_w = wide.xs(close_field, level=1, axis=1)
+
+        if has_open:
+            open_w = wide.xs(open_field, level=1, axis=1)
+        else:
+            open_w = None
+
+    else:
+        # close-only
+        close_w = wide
+        open_w = None
+
+    close_w = close_w.sort_index()
+
+    # If we have intraday open, align columns to close columns
+    if open_w is not None:
+        open_w = open_w.reindex(columns=close_w.columns).sort_index()
+
+    # ----------------------------
+    # Intrabar returns for RV (use CLOSE series)
+    # ----------------------------
+    r = compute_returns(close_w, kind=return_kind)  # aligned to bar timestamps
     r_sq = r.pow(2)
 
-    # resample offset:
-    # pandas offset shifts the bin *boundaries*. To make the "day end" at cutoff_hour,
-    # shift boundaries back by cutoff_hour (negative).
+    # boundary shift so bins "end" at cutoff_hour in local tz
     hours = int(cutoff_hour)
     minutes = int(round((cutoff_hour - hours) * 60))
     boundary_shift = pd.Timedelta(hours=hours, minutes=minutes)
 
-    # build per-asset aggregates
-    frames = []
-    for a in prices.columns:
+    frames: list[pd.DataFrame] = []
+
+    for a in close_w.columns:
+        price_c = close_w[a]
+
+        # open/close per period:
+        # - close: last close within the bin
+        # - open: if intraday open is available, use first open within the bin
+        #         else fall back to first close within the bin
+        if open_w is not None and a in open_w.columns:
+            price_o = open_w[a]
+            src_open = "open"
+        else:
+            price_o = price_c
+            src_open = "close"  # inferred open from first close
+
         df = pd.DataFrame(
             {
-                "price": prices[a],
+                "open_src": price_o,
+                "close_src": price_c,
                 "r": r[a],
                 "r_sq": r_sq[a],
             }
-        )       
-
+        )
 
         agg = (
             df.resample(freq, offset=boundary_shift)
               .agg(
-                  open=("price", "first"),
-                  close=("price", "last"),
+                  open=("open_src", "first"),
+                  close=("close_src", "last"),
                   ret=("r", "sum"),
                   rvar=("r_sq", "sum"),
                   n_intra=("r", "count"),
               )
         )
-        agg["rvol"] = np.sqrt(agg["rvar"])
 
-        # put into (asset, metric) columns
+        agg["rvol"] = np.sqrt(agg["rvar"])
+        agg["open_is_inferred"] = 0 if src_open == "open" else 1  # handy debug flag
+
+        # (asset, metric) columns
         agg.columns = pd.MultiIndex.from_product([[a], agg.columns])
         frames.append(agg)
 
     out = pd.concat(frames, axis=1).sort_index()
     return out
+
 
 
 

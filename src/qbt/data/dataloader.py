@@ -22,7 +22,6 @@ def load_multi_asset_flat_long(
     file_format: str = "parquet",
     timestamp_col: str = "timestamp",
     fields: Sequence[str] = ("close",),
-    tz: str = "America/New_York",
 ) -> pd.DataFrame:
     """
     Returns LONG data:
@@ -57,12 +56,6 @@ def load_multi_asset_flat_long(
         out["asset"] = a
         out = out.dropna(subset=[timestamp_col]).sort_values(timestamp_col)
 
-        # tz normalize
-        t = out[timestamp_col]
-        if getattr(t.dt, "tz", None) is None:
-            out[timestamp_col] = t.dt.tz_localize(tz)
-        else:
-            out[timestamp_col] = t.dt.tz_convert(tz)
 
         keep = [timestamp_col, "asset", *[c for c in fields if c in out.columns]]
         frames.append(out[keep])
@@ -74,24 +67,54 @@ def load_multi_asset_flat_long(
 
 def long_to_wide(
     raw_long: pd.DataFrame,
+    *,
     timestamp_col: str = "timestamp",
     asset_col: str = "asset",
     value_cols: Sequence[str] = ("close",),
-) -> dict[str, pd.DataFrame]:
+) -> pd.DataFrame:
     """
-    Returns dict[field] = wide DataFrame(index=time, columns=assets)
+    Convert long OHLCV-style data into a wide DataFrame with MultiIndex columns.
+
+    Parameters
+    ----------
+    raw_long : DataFrame
+        Columns: [timestamp_col, asset_col, <value_cols...>]
+    value_cols : Sequence[str]
+        Fields to pivot (e.g. ["open", "close", "volume"])
+
+    Returns
+    -------
+    wide : DataFrame
+        index   = DatetimeIndex (tz-aware)
+        columns = MultiIndex (asset, field)
     """
-    out: dict[str, pd.DataFrame] = {}
-    for c in value_cols:
-        if c not in raw_long.columns:
-            raise ValueError(f"Missing required column '{c}' in raw data.")
-        wide = (
-            raw_long[[timestamp_col, asset_col, c]]
-            .pivot(index=timestamp_col, columns=asset_col, values=c)
+    missing = {timestamp_col, asset_col, *value_cols} - set(raw_long.columns)
+    if missing:
+        raise ValueError(f"Missing required columns in raw_long: {missing}")
+
+    frames: list[pd.DataFrame] = []
+
+    for field in value_cols:
+        w = (
+            raw_long[[timestamp_col, asset_col, field]]
+            .pivot(index=timestamp_col, columns=asset_col, values=field)
             .sort_index()
         )
-        out[c] = wide
-    return out
+
+        # attach field level
+        w.columns = pd.MultiIndex.from_product(
+            [w.columns, [field]],
+            names=[asset_col, "field"],
+        )
+        frames.append(w)
+
+    # concatenate along columns
+    wide = pd.concat(frames, axis=1).sort_index()
+
+    # ensure consistent column ordering: (asset, field)
+    wide = wide.sort_index(axis=1, level=[0, 1])
+
+    return wide
 
 
 
@@ -122,60 +145,58 @@ class DefaultDataAdapter(DataAdapter):
             file_format=d.get("file_format", "parquet"),
             timestamp_col=d.get("columns", {}).get("timestamp", "timestamp"),
             fields=tuple(d.get("columns", {}).get("fields", ["close"])),
-            tz=d.get("tz", "America/New_York"),
         )
 
     def prepare(self, raw: pd.DataFrame, spec: RunSpec, required_cols: list[str]) -> ModelInputs:
-        # 1) pivot to wide
+        # 1) pivot to wide (expects raw timestamps already tz-aware UTC)
         ts_col = spec.data.get("columns", {}).get("timestamp", "timestamp")
         fields = tuple(spec.data.get("columns", {}).get("fields", ["open", "close"]))
         wide = long_to_wide(raw, timestamp_col=ts_col, value_cols=fields)
 
-
-        # TIMING STRATEGY Specific abstract later
-
-        open_15m = wide.get("open")
-        close_15m = wide.get("close")
-        if open_15m is None or close_15m is None:
-            raise ValueError("Expected 'open' and 'close' in data.columns.fields.")
-
-        open_15m = open_15m.sort_index()
-        close_15m = close_15m.sort_index()
-
-        # 2) intraday close-to-close returns (15m) for RV computations
-        # NOTE: this is NOT what you use for 'trade next open' execution; it's for features.
+        # --- feature config ---
         p = spec.features  # dict-like
-        tz = p.get("tz", "America/New_York")
+        market_tz = p.get("tz", "America/New_York")
         return_kind = p.get("return_kind", "log")
+        cutoff_hour = float(p.get("cutoff_hour", 14.0))  # optional override
 
-        # 3) aggregate to daily using close series (your current approach)
-        daily = aggregate_intra_bars(
-            prices=close_15m,
+     
+        # 4) aggregate to daily in market tz (returns a DataFrame with MultiIndex columns: (asset, metric))
+        daily_mkt = aggregate_intra_bars(
+            wide=wide,
             freq="1B",
-            cutoff_hour=15.0,
+            cutoff_hour=cutoff_hour,
             return_kind=return_kind,
-            tz=tz,
+            tz=market_tz,
         ).dropna(how="any")
 
-        # 4) daily open/close (wide: cols=assets)
-        daily_open  = daily.xs("open",  level=1, axis=1)
-        daily_close = daily.xs("close", level=1, axis=1)
 
-        # 5) daily close-to-close return (standard diff, aligned to day t close)
+        # ensure expected metrics exist
+        if not isinstance(daily_mkt.columns, pd.MultiIndex):
+            raise ValueError("aggregate_intra_bars() must return MultiIndex columns like (asset, metric).")
+        metrics = set(daily_mkt.columns.get_level_values(1))
+        if "open" not in metrics or "close" not in metrics:
+            raise ValueError("aggregate_intra_bars() output must include metrics 'open' and 'close'.")
+
+        # 5) daily open/close (in market tz), then convert index back to UTC
+        daily_open_mkt = daily_mkt.xs("open", level=1, axis=1)
+        daily_close_mkt = daily_mkt.xs("close", level=1, axis=1)
+
+        daily_open = daily_open_mkt.tz_convert("UTC")
+        daily_close = daily_close_mkt.tz_convert("UTC")
+
+        # 6) returns
         ret_cc = compute_returns(daily_close, kind=return_kind)
-
-        # 6) daily open-to-open return for "trade next open" execution
-        # ret_oo[t] corresponds to open[t] -> open[t+1], aligned to t
         ret_oo = compute_returns(daily_open, kind=return_kind)
 
-        # 7) features (example: daily rvol from aggregator, flattened)
-        X_parts = []
-        if ("XLE", "rvol") in daily.columns or any(m == "rvol" for _, m in daily.columns):
-            rvol = daily.xs("rvol", level=1, axis=1)  # wide cols=assets
+        # 7) features: rvol from daily_mkt (market tz), then convert to UTC index
+        X_parts: list[pd.DataFrame] = []
+        if "rvol" in metrics:
+            rvol_mkt = daily_mkt.xs("rvol", level=1, axis=1)
+            rvol = rvol_mkt.tz_convert("UTC")
             rvol.columns = [f"{c}_rvol" for c in rvol.columns]
             X_parts.append(rvol)
 
-        X = pd.concat(X_parts, axis=1) if X_parts else pd.DataFrame(index=daily.index)
+        X = pd.concat(X_parts, axis=1) if X_parts else pd.DataFrame(index=daily_close.index)
 
         # 8) required feature columns check
         if required_cols:
@@ -183,12 +204,11 @@ class DefaultDataAdapter(DataAdapter):
             if missing:
                 raise ValueError(f"Missing required feature columns: {missing}")
 
-        # 9) align indices (important!)
-        # Choose a single daily index where everything exists.
-        # ret_oo is shorter by 1 row (no last open->open), so intersect.
-        idx = daily.index
-        idx = idx.intersection(ret_cc.index)
-        idx = idx.intersection(ret_oo.index)  # drops last day automatically
+        # 9) align indices (drop last day because of shift(-1) -> NaN)
+        idx = daily_close.index
+        idx = idx.intersection(ret_cc.dropna(how="all").index)
+        idx = idx.intersection(ret_oo.dropna(how="all").index)
+        idx = idx.intersection(X.index)
 
         daily_open = daily_open.loc[idx]
         daily_close = daily_close.loc[idx]
@@ -196,11 +216,7 @@ class DefaultDataAdapter(DataAdapter):
         ret_oo = ret_oo.loc[idx]
         X = X.reindex(idx)
 
-        # intraday returns: keep full intraday index, but you may also want to trim
-        # to cover only the same date range as idx (optional)
-        # ret_intra_cc = ret_intra_cc.loc[ret_intra_cc.index.min():ret_intra_cc.index.max()]
-
         return ModelInputs(
-            ret=ret_oo,
-            features=X,
+            ret=ret_oo,   # execution return stream (open->open aligned to decision day t)
+            features=X,   # features indexed on same day t (UTC)
         )

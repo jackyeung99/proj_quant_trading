@@ -1,162 +1,333 @@
 import numpy as np
 import pandas as pd
+import pytest
 
+# Import your module under test
+# Adjust this import to wherever your code lives
 import qbt.backtesting.engine as engine
 
 
-class DummyBuyHold:
+# -------------------------
+# Strategy + adapter stubs
+# -------------------------
+
+class DummyStrategy:
     """
-    Minimal strategy stub.
-    - fit: record calls
-    - compute_weight: return 1.0 exposure for all rows passed in
+    Strategy stub compatible with your engine:
+      - required_features(spec) -> list[str]
+      - fit(ModelInputs, spec)
+      - predict(ModelInputs, spec) -> Series or DataFrame
     """
-    def __init__(self):
+    def __init__(self, mode="series", weight_value=1.0):
+        self.mode = mode
+        self.weight_value = float(weight_value)
         self.fit_calls = 0
-        self.compute_calls = 0
-        self.last_compute_index = None
+        self.predict_calls = 0
+        self.last_fit_index = None
+        self.last_predict_index = None
 
-    def fit(self, data: pd.DataFrame, spec) -> None:
+    def required_features(self, spec):
+        # Pretend the strategy needs two features
+        return ["feat_a", "feat_b"]
+
+    def fit(self, inputs, spec):
         self.fit_calls += 1
+        self.last_fit_index = inputs.ret.index
 
-    def compute_weight(self, data: pd.DataFrame, spec) -> pd.Series:
-        self.compute_calls += 1
-        self.last_compute_index = data.index
-        return pd.Series(1.0, index=data.index, dtype=float)
+    def predict(self, inputs, spec):
+        self.predict_calls += 1
+        self.last_predict_index = inputs.ret.index
+
+        idx = inputs.ret.index
+        cols = list(inputs.ret.columns)
+
+        if self.mode == "series":
+            # A single weight series -> engine should broadcast to all assets
+            return pd.Series(self.weight_value, index=idx, name="w", dtype=float)
+
+        if self.mode == "df":
+            # Already [T x N]
+            return pd.DataFrame(self.weight_value, index=idx, columns=cols, dtype=float)
+
+        raise ValueError("Unknown mode")
 
 
-def fake_simulator(data: pd.DataFrame, w, weight_lag: int):
+class SpyDataAdapter:
     """
-    A tiny deterministic simulator so tests don't depend on
-    your simulator column naming / multiindex / etc.
-
-    Expects:
-      - data has column 'ret'
-      - w is a Series indexed by date (or a DataFrame with one column)
-    Returns columns that your engine expects: ret_net, equity_net, weight
+    DataAdapter stub compatible with your engine:
+      - load(spec) -> raw df (could be anything)
+      - prepare(raw, spec, required_cols=...) -> ModelInputs
     """
-    if isinstance(w, pd.DataFrame):
-        # assume single-asset weights DF
-        ws = w.iloc[:, 0]
-    else:
-        ws = w
+    def __init__(self, inputs):
+        self._inputs = inputs
+        self.load_calls = 0
+        self.prepare_calls = 0
+        self.last_required_cols = None
+        self.last_raw = None
 
-    ws = ws.reindex(data.index).fillna(0.0).astype(float)
-    ws_lag = ws.shift(weight_lag).fillna(0.0)
+    def load(self, spec):
+        self.load_calls += 1
+        # raw can be anything; engine passes it into prepare()
+        raw = pd.DataFrame({"raw": [1]})
+        self.last_raw = raw
+        return raw
 
-    ret_net = ws_lag * data["ret"].astype(float)
-    equity_net = (1.0 + ret_net).cumprod()
+    def prepare(self, raw, spec, required_cols):
+        self.prepare_calls += 1
+        self.last_required_cols = list(required_cols)
+        return self._inputs
 
-    out = pd.DataFrame(
-        {
-            "weight": ws_lag,
-            "ret_net": ret_net,
-            "equity_net": equity_net,
-        },
-        index=data.index,
+
+# -------------------------
+# Helpers
+# -------------------------
+
+def make_inputs(idx, assets=("A", "B")):
+    ret = pd.DataFrame(
+        {a: np.linspace(0.01, 0.01, len(idx)) for a in assets},
+        index=idx,
+        dtype=float,
     )
+    features = pd.DataFrame(
+        {
+            "feat_a": np.arange(len(idx), dtype=float),
+            "feat_b": np.arange(len(idx), dtype=float) + 100.0,
+        },
+        index=idx,
+    )
+    return engine.ModelInputs(ret=ret, features=features)
+
+
+def fake_simulator(ret_df, w_df, weight_lag, transaction_cost_bps, **kwargs):
+    """
+    Deterministic simulator stub:
+    - returns a dataframe containing 'port_ret_gross' so compute_metrics() works
+    - checks alignment and uses lagged weights
+    """
+    assert isinstance(ret_df, pd.DataFrame)
+    assert isinstance(w_df, pd.DataFrame)
+    assert ret_df.index.equals(w_df.index)
+    assert list(ret_df.columns) == list(w_df.columns)
+
+    w_lag = w_df.shift(weight_lag).fillna(0.0)
+    # Simple portfolio return: equal-weighted across assets after applying weights
+    port_ret = (w_lag * ret_df).mean(axis=1)
+
+    out = pd.DataFrame({"port_ret_gross": port_ret}, index=ret_df.index)
     return out
 
 
-def fake_metrics(series: pd.Series) -> dict:
-    # minimal metrics stub
-    return {"mean": float(series.mean())}
+def fake_metrics(s):
+    return {"mean": float(pd.Series(s).mean())}
 
 
-def test_run_backtest_single_shot_smoke(monkeypatch):
+class Spec:
+    strategy_name = "Dummy"
+    universe = "TEST"
+    data = {"path": "dummy.parquet"}
+    params = {"x": 1}
+    tag = "taggy"
+
+
+class BT:
+    def __init__(self, weight_lag=1, transaction_cost_bps=0.0):
+        self.use_walk_forward = False
+        self.weight_lag = weight_lag
+        self.transaction_cost_bps = transaction_cost_bps
+        self.train_size = .8 
+        self.test_size = .2
+        self.min_train = 1
+        self.expanding = False
+
+
+# -------------------------
+# Tests: _normalize_weights_to_df
+# -------------------------
+
+def test_normalize_weights_series_broadcasts_to_assets():
+    idx = pd.date_range("2020-01-01", periods=3, freq="D")
+    assets = ["A", "B", "C"]
+    w = pd.Series([1.0, 0.5, 0.0], index=idx)
+
+    out = engine._normalize_weights_to_df(w, index=idx, assets=assets)
+    assert isinstance(out, pd.DataFrame)
+    assert list(out.columns) == assets
+    assert out.shape == (3, 3)
+    assert np.allclose(out["A"].to_numpy(), [1.0, 0.5, 0.0])
+    assert np.allclose(out["B"].to_numpy(), [1.0, 0.5, 0.0])
+    assert np.allclose(out["C"].to_numpy(), [1.0, 0.5, 0.0])
+
+
+def test_normalize_weights_df_reindexes_and_fills_missing():
     idx = pd.date_range("2020-01-01", periods=4, freq="D")
-    df = pd.DataFrame({"ret": [0.01, -0.02, 0.03, 0.00]}, index=idx)
+    assets = ["A", "B"]
+    # Missing last date + missing column B
+    w_df = pd.DataFrame({"A": [1.0, 1.0, 1.0]}, index=idx[:3])
 
-    # avoid disk I/O
-    monkeypatch.setattr(engine, "load_data", lambda spec: df)
-
-    # strategy map -> dummy strategy
-    monkeypatch.setattr(engine, "_STRATEGY_MAP", {"BuyHold": DummyBuyHold})
-
-    # deterministic simulator + metrics
-    monkeypatch.setattr(engine, "simulate_strategy_execution", fake_simulator)
-    monkeypatch.setattr(engine, "compute_metrics", fake_metrics)
-
-    # minimal spec stub (attributes referenced by engine.run_backtest)
-    class Spec:
-        strategy_name = "BuyHold"
-        universe = "TEST"
-        data_path = "dummy.csv"
-        weight_lag = 1
-        params = {}
-        tag = None
-        # ret_col/date_col only used by real load_data, which we patched out
-        ret_col = "ret"
-        date_col = "date"
-
-    res = engine.run_backtest(Spec())
-
-    assert res.meta.strategy_name == "BuyHold"
-    assert "ret_net" in res.timeseries.columns
-    assert "equity_net" in res.timeseries.columns
-    assert "weight" in res.timeseries.columns
-
-    # lag means first day should have 0 exposure
-    w = res.timeseries["weight"].to_numpy()
-    assert np.allclose(w, np.array([0.0, 1.0, 1.0, 1.0]), atol=1e-12)
-
-    # equity should start at 1.0 and be finite
-    eq = res.timeseries["equity_net"].to_numpy()
-    assert np.isfinite(eq).all()
-    assert abs(eq[0] - 1.0) < 1e-12
+    out = engine._normalize_weights_to_df(w_df, index=idx, assets=assets)
+    assert out.shape == (4, 2)
+    # Column B should be filled with 0.0
+    assert np.allclose(out["B"].to_numpy(), 0.0)
+    # Last date should be filled with 0.0
+    assert out.loc[idx[-1], "A"] == 0.0
 
 
-def test_run_backtest_walk_forward_stitches_test_windows_only(monkeypatch):
+# -------------------------
+# Tests: build_weights (no WF vs WF)
+# -------------------------
+
+def test_build_weights_no_walk_forward_calls_fit_once_and_predict_once(monkeypatch):
+    idx = pd.date_range("2020-01-01", periods=5, freq="D")
+    inputs = make_inputs(idx, assets=("A", "B"))
+    strat = DummyStrategy(mode="series", weight_value=1.0)
+
+    # bt=None triggers the "no walk-forward" branch in your build_weights()
+    w = engine.build_weights(
+        inputs=inputs,
+        strat=strat,
+        spec=Spec(),
+        assets=["A", "B"],
+        bt=None,
+    )
+
+    assert strat.fit_calls == 1
+    assert strat.predict_calls == 1
+    assert w.shape == (5, 2)
+    assert np.allclose(w.to_numpy(), 1.0)
+
+
+def test_build_weights_walk_forward_stitches_only_test_windows(monkeypatch):
     idx = pd.date_range("2020-01-01", periods=6, freq="D")
-    df = pd.DataFrame({"ret": [0.01, 0.02, -0.01, 0.03, 0.00, 0.01]}, index=idx)
+    inputs = make_inputs(idx, assets=("A", "B"))
+    strat = DummyStrategy(mode="series", weight_value=1.0)
 
-    # avoid disk I/O
-    monkeypatch.setattr(engine, "load_data", lambda spec: df)
-
-    # strategy map -> dummy strategy
-    monkeypatch.setattr(engine, "_STRATEGY_MAP", {"BuyHold": DummyBuyHold})
-
-    # deterministic simulator + metrics
-    monkeypatch.setattr(engine, "simulate_strategy_execution", fake_simulator)
-    monkeypatch.setattr(engine, "compute_metrics", fake_metrics)
-
-    # stub WalkForwardSpec so engine.WalkForwardSpec(**wf_cfg) always works
-    class DummyWF:
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
-
-    monkeypatch.setattr(engine, "WalkForwardSpec", DummyWF)
-
-    # force a single WF split: train first 3 days, test last 3 days
-    def fake_splits(index, wf):
-        train_idx = index[:3]
-        test_idx = index[3:]
-        yield train_idx, test_idx
+    # Force 2 splits:
+    # train: [0,1,2] test: [3,4]
+    # train: [0,1,2,3,4] test: [5]
+    def fake_splits(index, bt):
+        yield index[:3], index[3:5]
+        yield index[:5], index[5:]
 
     monkeypatch.setattr(engine, "iter_walk_forward_splits", fake_splits)
 
-    class Spec:
-        strategy_name = "BuyHold"
-        universe = "TEST"
-        data_path = "dummy.csv"
-        weight_lag = 1
-        params = {"walk_forward": {"any": "thing"}}  # truthy => WF branch
-        tag = None
-        ret_col = "ret"
-        date_col = "date"
+    bt = BT(weight_lag=1, transaction_cost_bps=0.0)
 
-    res = engine.run_backtest(Spec())
+    w = engine.build_weights(
+        inputs=inputs,
+        strat=strat,
+        spec=Spec(),
+        assets=["A", "B"],
+        bt=bt,
+    )
 
-    ts = res.timeseries
+    # full_w starts at zeros and only fills test windows
+    # dates 0,1,2 never in test => should be 0
+    assert np.allclose(w.loc[idx[:3]].to_numpy(), 0.0)
+    # dates 3,4,5 are in test windows => should be 1
+    assert np.allclose(w.loc[idx[3:]].to_numpy(), 1.0)
 
-    # in walk-forward we only set weights for the TEST window (last 3 days),
-    # then the simulator lags by 1 day
-    #
-    # full_w: [0,0,0, 1,1,1]
-    # lag=1 => weight series in output: [0,0,0, 0,1,1]
-    expected_w = np.array([0.0, 0.0, 0.0, 0.0, 1.0, 1.0])
-    assert np.allclose(ts["weight"].to_numpy(), expected_w, atol=1e-12)
+    # fit/predict called once per split
+    assert strat.fit_calls == 2
+    assert strat.predict_calls == 2
 
-    # sanity: returns are weight * ret, first nonzero should be on day 5
-    # (because test window starts day 4 but gets lagged to day 5)
-    assert ts["ret_net"].iloc[:4].abs().sum() == 0.0
-    assert np.isfinite(ts["equity_net"].to_numpy()).all()
+
+# -------------------------
+# Tests: BacktestEngine.run integration (plumbing)
+# -------------------------
+
+def test_engine_run_plumbs_required_features_and_calls_simulator(monkeypatch):
+    idx = pd.date_range("2020-01-01", periods=5, freq="D")
+    inputs = make_inputs(idx, assets=("A", "B"))
+    adapter = SpyDataAdapter(inputs=inputs)
+
+    # Stub create_strategy -> returns our DummyStrategy
+    dummy = DummyStrategy(mode="series", weight_value=1.0)
+    monkeypatch.setattr(engine, "create_strategy", lambda name: dummy)
+
+    # Stub simulator + metrics
+    monkeypatch.setattr(engine, "simulate_strategy_execution", fake_simulator)
+    monkeypatch.setattr(engine, "compute_metrics", fake_metrics)
+
+    # Make run_id deterministic for assertions
+    monkeypatch.setattr(engine, "make_run_id", lambda s, u: "RUN123")
+
+    eng = engine.BacktestEngine(data_adapter=adapter)
+    bt = BT(weight_lag=2, transaction_cost_bps=7.5)
+
+    res = eng.run(Spec(), bt)
+
+    # Adapter usage
+    assert adapter.load_calls == 1
+    assert adapter.prepare_calls == 1
+    assert adapter.last_required_cols == ["feat_a", "feat_b"]
+
+    # Strategy usage
+    assert dummy.fit_calls >= 1
+    assert dummy.predict_calls >= 1
+
+    # Timeseries must include what engine uses for metrics
+    assert "port_ret_gross" in res.timeseries.columns
+    assert res.meta.run_id == "RUN123"
+    assert res.meta.strategy_name == "Dummy"
+    assert res.meta.universe == "TEST"
+    assert res.meta.weight_lag == 2
+    assert res.meta.params == {"x": 1}
+    assert res.meta.tag == "taggy"
+
+    # Metrics stubbed
+    assert "mean" in res.metrics
+    assert np.isfinite(res.metrics["mean"])
+
+
+def test_engine_run_multi_asset_predict_df_not_broadcast(monkeypatch):
+    idx = pd.date_range("2020-01-01", periods=4, freq="D")
+    inputs = make_inputs(idx, assets=("A", "B", "C"))
+    adapter = SpyDataAdapter(inputs=inputs)
+
+    # Strategy returns a DF with per-asset weights (not broadcast)
+    dummy = DummyStrategy(mode="df", weight_value=0.25)
+    monkeypatch.setattr(engine, "create_strategy", lambda name: dummy)
+
+    # Intercept simulator to assert weights are passed as [T x N] with correct columns
+    def sim_assert(ret_df, w_df, weight_lag, transaction_cost_bps, **kwargs):
+        assert list(w_df.columns) == ["A", "B", "C"]
+        assert w_df.shape == (4, 3)
+        assert np.allclose(w_df.to_numpy(), 0.25)
+        return pd.DataFrame({"port_ret_gross": np.zeros(len(ret_df))}, index=ret_df.index)
+
+    monkeypatch.setattr(engine, "simulate_strategy_execution", sim_assert)
+    monkeypatch.setattr(engine, "compute_metrics", fake_metrics)
+    monkeypatch.setattr(engine, "make_run_id", lambda s, u: "RUN456")
+
+    eng = engine.BacktestEngine(data_adapter=adapter)
+    bt = BT(weight_lag=1, transaction_cost_bps=0.0)
+    res = eng.run(Spec(), bt)
+
+    assert res.meta.run_id == "RUN456"
+    assert "port_ret_gross" in res.timeseries.columns
+
+
+def test_engine_run_passes_transaction_cost_bps(monkeypatch):
+    idx = pd.date_range("2020-01-01", periods=3, freq="D")
+    inputs = make_inputs(idx, assets=("A", "B"))
+    adapter = SpyDataAdapter(inputs=inputs)
+
+    dummy = DummyStrategy(mode="series", weight_value=1.0)
+    monkeypatch.setattr(engine, "create_strategy", lambda name: dummy)
+
+    seen = {}
+    def sim_capture(ret_df, w_df, weight_lag, transaction_cost_bps, **kwargs):
+        seen["weight_lag"] = weight_lag
+        seen["transaction_cost_bps"] = transaction_cost_bps
+        return pd.DataFrame({"port_ret_gross": np.zeros(len(ret_df))}, index=ret_df.index)
+
+    monkeypatch.setattr(engine, "simulate_strategy_execution", sim_capture)
+    monkeypatch.setattr(engine, "compute_metrics", fake_metrics)
+    monkeypatch.setattr(engine, "make_run_id", lambda s, u: "RUN789")
+
+    eng = engine.BacktestEngine(data_adapter=adapter)
+    bt = BT(weight_lag=3, transaction_cost_bps=12.3)
+    _ = eng.run(Spec(), bt)
+
+    assert seen["weight_lag"] == 3
+    assert seen["transaction_cost_bps"] == 12.3

@@ -9,6 +9,7 @@ from qbt.strategies.strategy_registry import register_strategy
 
 from qbt.metrics.summary import _sharpe
 
+
 @register_strategy("StateSignal")
 class StateSignalModel(Strategy):
     """
@@ -36,7 +37,7 @@ class StateSignalModel(Strategy):
             "ann_factor": int(params.get("ann_factor", 252)),
             "gamma": float(params.get("gamma", 5.0)),
             "w_min": float(params.get("w_min", 0.0)),
-            "w_max": float(params.get("w_max", 3.0)),
+            "w_max": float(params.get("w_high", 3.0)),
             "eps": float(params.get("eps", 1e-12)),
         }
 

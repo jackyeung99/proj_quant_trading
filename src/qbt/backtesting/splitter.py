@@ -61,7 +61,20 @@ def iter_walk_forward_splits(
     index: pd.Index,
     bt: BacktestSpec,
 ) -> Iterator[Tuple[pd.Index, pd.Index]]:
+    """
+    Yield (train_index, test_index) splits over a time index.
 
+    Conventions (position-based slicing, end-exclusive):
+      - rolling (expanding=False):
+          train window length = train_size
+          step size = test_size
+      - expanding (expanding=True):
+          first train window length = train_size
+          then grows by test_size each split
+          step size = test_size
+
+    Stops when a full test window of length test_size cannot be formed.
+    """
     n = len(index)
     if n == 0:
         return
@@ -70,34 +83,38 @@ def iter_walk_forward_splits(
     test = _parse_size(bt.test_size, n, name="test_size", allow_none=False)
     min_train = _parse_size(bt.min_train, n, name="min_train", allow_none=True)
 
-    # defaults
     if min_train is None:
         min_train = train
 
-    step = 1  
-
-    if train + test > n:
+    if train <= 0 or test <= 0:
         return
 
-    start = 0
-    while True:
-        if bt.expanding:
-            train_start = 0
-            train_end = start + train
-        else:
-            train_start = start
-            train_end = start + train
+    # We advance by test window size (standard walk-forward CV)
+    step = getattr(bt, "step_size", None)
+    if step is None:
+        step = test
+    step = _parse_size(step, n, name="step_size", allow_none=False)
 
+    # Start with a training end at least min_train (and typically train)
+    train_end = max(train, min_train)
+
+    # Safety: must be able to fit at least one test window
+    if train_end + test > n:
+        return
+
+    while True:
         test_start = train_end
         test_end = test_start + test
 
         if test_end > n:
             break
 
-        if (train_end - train_start) >= min_train:
-            yield (
-                index[train_start:train_end],
-                index[test_start:test_end],
-            )
+        if bt.expanding:
+            train_start = 0
+        else:
+            train_start = max(0, train_end - train)
 
-        start += step
+        
+        yield index[train_start:train_end], index[test_start:test_end]
+
+        train_end += step

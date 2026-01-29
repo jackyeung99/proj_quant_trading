@@ -55,7 +55,7 @@ def build_weights(
  
 
     # ---- no walk-forward ----
-    if bt is None:
+    if not bt.use_walk_forward:
         strat.fit(inputs, spec)
         w = strat.predict(inputs, spec)
         return _normalize_weights_to_df(w, index=inputs.ret.index, assets=assets)
@@ -81,6 +81,8 @@ def build_weights(
         )
 
     return full_w
+
+
 @dataclass
 class BacktestEngine:
     data_adapter: DataAdapter = field(default_factory=DefaultDataAdapter)
@@ -105,7 +107,7 @@ class BacktestEngine:
             bt=bt,
         )
 
-        print(w)
+     
         ts_df = simulate_strategy_execution(
             inputs.ret,
             w,
@@ -129,5 +131,5 @@ class BacktestEngine:
         )
 
         metrics = compute_metrics(ts_df["port_ret_gross"])
-        print(metrics)
+        logging.info(metrics)
         return RunResult(meta=meta, timeseries=ts_df, metrics=metrics)

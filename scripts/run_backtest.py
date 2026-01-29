@@ -34,7 +34,7 @@ def run_spec(cfg: dict, bt_spec_df: dict, store: ArtifactsStore, bt: BacktestEng
 
 
     result = bt.run(spec, bt_spec)
-    # store.write_run(result.meta, result.timeseries, result.metrics)
+    store.write_run(result.meta, result.timeseries, result.metrics)
     print("Wrote run:", result.meta.run_id, "|", spec.strategy_name, "|", spec.universe, "| tag:", spec.tag)
 
 def main():
@@ -55,6 +55,7 @@ def main():
     base_state = load_yaml("configs/strategies/run_state.yaml")
 
     run_spec(base_state, bt_cfg, store, bt)
+    run_spec(base_buyhold, bt_cfg, store, bt)
 
 
 
