@@ -17,13 +17,13 @@ sources:
   equities_intraday_15m:
     enabled: true
     provider: alpaca
-    symbols: ["XLE"]
+    symbols: ["XLE", "SPY"]
     interval: "15Min"
     feed: "iex"
     adjustment: "all"
 
   macro_fred:
-    enabled: false
+    enabled: true
     provider: fred
     symbols: ["VIXCLS", "DGS10", "DGS2"]
     interval: "1d"

@@ -91,12 +91,14 @@ class BacktestEngine:
         strat = create_strategy(spec.strategy_name)
 
         raw = self.data_adapter.load(spec)
+
         required_features = strat.required_features(spec)
 
         inputs: ModelInputs = self.data_adapter.prepare(
             raw, spec, required_cols=required_features
         )
 
+   
         assets = list(inputs.ret.columns)
    
         w = build_weights(

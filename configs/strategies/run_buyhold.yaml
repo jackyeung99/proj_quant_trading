@@ -4,16 +4,4 @@ universe: XLE
 assets:
   - XLE
 
-data:
-  interval: 15Min
-  tz: America/New_York
-  root: data/bronze
-  file_format: parquet
-  layout:
-    # maps to: data/freq=<bar>/ticker=<asset>.<ext>
-    interval_dir: true
-    filename: "bars.{ext}"
-  columns:
-    timestamp: timestamp
-    fields: [open, high, low, close, volume]
-
+data_path: 'data/gold/model.parquet'

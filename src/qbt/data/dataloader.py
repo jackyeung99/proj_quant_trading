@@ -2,126 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
-import numpy as np
 import pandas as pd
 
 from qbt.core.types import ModelInputs, RunSpec
-from qbt.features.transforms import *
-from qbt.features.feature_engineering import *
 
-# ----------------------------
-# IO: load long OHLCV, then pivot to wide
-# ----------------------------
-
-def load_multi_asset_flat_long(
-    root: str | Path,
-    bar: str,                      # "15min", "1d"
-    assets: Sequence[str],
-    file_format: str = "parquet",
-    timestamp_col: str = "timestamp",
-    fields: Sequence[str] = ("close",),
-) -> pd.DataFrame:
-    """
-    Returns LONG data:
-      columns: [timestamp, asset, <fields...>]
-    """
-    root = Path(root)
-    frames: list[pd.DataFrame] = []
-
-    ext = "parquet" if file_format == "parquet" else "csv"
-
-    for a in assets:
-        path = root/f"freq={bar}"/f"ticker={a}/bars.{ext}"
-
-        print(path)
-        if not path.exists():
-            raise FileNotFoundError(f"Missing data for asset={a}: {path}")
-
-        if ext == "parquet":
-            # only read needed fields + timestamp
-            cols = [timestamp_col, *fields]
-            df = pd.read_parquet(path, columns=cols)
-        else:
-            df = pd.read_csv(path)
-
-        if timestamp_col in df.columns:
-            ts = pd.to_datetime(df[timestamp_col], errors="coerce")
-        else:
-            ts = pd.to_datetime(df.index, errors="coerce")
-
-        out = df.copy()
-        out[timestamp_col] = ts
-        out["asset"] = a
-        out = out.dropna(subset=[timestamp_col]).sort_values(timestamp_col)
-
-
-        keep = [timestamp_col, "asset", *[c for c in fields if c in out.columns]]
-        frames.append(out[keep])
-
-    raw = pd.concat(frames, ignore_index=True)
-    raw = raw.sort_values(["asset", timestamp_col])
-    return raw
-
-
-def long_to_wide(
-    raw_long: pd.DataFrame,
-    *,
-    timestamp_col: str = "timestamp",
-    asset_col: str = "asset",
-    value_cols: Sequence[str] = ("close",),
-) -> pd.DataFrame:
-    """
-    Convert long OHLCV-style data into a wide DataFrame with MultiIndex columns.
-
-    Parameters
-    ----------
-    raw_long : DataFrame
-        Columns: [timestamp_col, asset_col, <value_cols...>]
-    value_cols : Sequence[str]
-        Fields to pivot (e.g. ["open", "close", "volume"])
-
-    Returns
-    -------
-    wide : DataFrame
-        index   = DatetimeIndex (tz-aware)
-        columns = MultiIndex (asset, field)
-    """
-    missing = {timestamp_col, asset_col, *value_cols} - set(raw_long.columns)
-    if missing:
-        raise ValueError(f"Missing required columns in raw_long: {missing}")
-
-    frames: list[pd.DataFrame] = []
-
-    for field in value_cols:
-        w = (
-            raw_long[[timestamp_col, asset_col, field]]
-            .pivot(index=timestamp_col, columns=asset_col, values=field)
-            .sort_index()
-        )
-
-        # attach field level
-        w.columns = pd.MultiIndex.from_product(
-            [w.columns, [field]],
-            names=[asset_col, "field"],
-        )
-        frames.append(w)
-
-    # concatenate along columns
-    wide = pd.concat(frames, axis=1).sort_index()
-
-    # ensure consistent column ordering: (asset, field)
-    wide = wide.sort_index(axis=1, level=[0, 1])
-
-    return wide
-
-
-
-
-# ----------------------------
-# Adapter
-# ----------------------------
 
 class DataAdapter:
     def load(self, spec: RunSpec) -> pd.DataFrame: ...
@@ -131,92 +16,83 @@ class DataAdapter:
 @dataclass
 class DefaultDataAdapter(DataAdapter):
     """
-    - load() returns LONG raw OHLCV
-    - prepare() returns ModelInputs with clean separation
+    Assumes the input is a persisted LONG modeling table (gold) with columns:
+      - date or timestamp
+      - asset
+      - return column (ret_oo preferred, else ret_cc)
+      - feature columns
+
+    load()   -> returns the LONG modeling table (DataFrame)
+    prepare() -> returns ModelInputs with wide ret + wide features
     """
 
     def load(self, spec: RunSpec) -> pd.DataFrame:
-        d = spec.data  # assumes spec.data is dict-like (or a dataclass)
+        data_path = spec.data_path
 
-        return load_multi_asset_flat_long(
-            root=d["root"],
-            bar=str(d.get('interval', '1d')),          # or spec.time.bar
-            assets=spec.assets,
-            file_format=d.get("file_format", "parquet"),
-            timestamp_col=d.get("columns", {}).get("timestamp", "timestamp"),
-            fields=tuple(d.get("columns", {}).get("fields", ["close"])),
-        )
+        if not data_path:
+            raise ValueError("spec.data must include 'data_path' pointing to the modeling table parquet/csv.")
+
+        path = Path(data_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Modeling table not found at: {path}")
+
+
+        # infer from suffix
+        if path.suffix.lower() in [".parquet"]:
+            fmt = "parquet"
+        elif path.suffix.lower() in [".csv"]:
+            fmt = "csv"
+        else:
+            raise ValueError(f"Could not infer file format from suffix: {path.suffix}")
+
+        # minimal read
+        if fmt == "parquet":
+            df = pd.read_parquet(path)
+        elif fmt == "csv":
+            df = pd.read_csv(path)
+        else:
+            raise ValueError(f"Unsupported file_format={fmt!r}. Use 'parquet' or 'csv'.")
+
+
+        return df
 
     def prepare(self, raw: pd.DataFrame, spec: RunSpec, required_cols: list[str]) -> ModelInputs:
-        # 1) pivot to wide (expects raw timestamps already tz-aware UTC)
-        ts_col = spec.data.get("columns", {}).get("timestamp", "timestamp")
-        fields = tuple(spec.data.get("columns", {}).get("fields", ["open", "close"]))
-        wide = long_to_wide(raw, timestamp_col=ts_col, value_cols=fields)
+        if not isinstance(raw.columns, pd.MultiIndex):
+            raise ValueError("Expected raw to have MultiIndex columns: (asset, field).")
 
-        # --- feature config ---
-        p = spec.features  # dict-like
-        market_tz = p.get("tz", "America/New_York")
-        return_kind = p.get("return_kind", "log")
-        cutoff_hour = float(p.get("cutoff_hour", 14.0))  # optional override
+        # pick return stream
+        fields = set(raw.columns.get_level_values(1))
+        ret_field = "ret_oo" if "ret_oo" in fields else "ret_cc"
+        if ret_field not in fields:
+            raise ValueError("Missing return field: expected 'ret_oo' or 'ret_cc' in raw columns.")
 
-     
-        # 4) aggregate to daily in market tz (returns a DataFrame with MultiIndex columns: (asset, metric))
-        daily_mkt = aggregate_intra_bars(
-            wide=wide,
-            freq="1B",
-            cutoff_hour=cutoff_hour,
-            return_kind=return_kind,
-            tz=market_tz,
-        ).dropna(how="any")
+        # wide returns (date x assets)
+        ret_wide = raw.xs(ret_field, level=1, axis=1).sort_index().sort_index(axis=1)
 
+        # flatten ALL columns into "<asset>_<field>"
+        X = raw.copy().sort_index().sort_index(axis=1, level=[0, 1])
+        X.columns = [f"{a}_{f}" for a, f in X.columns]
 
-        # ensure expected metrics exist
-        if not isinstance(daily_mkt.columns, pd.MultiIndex):
-            raise ValueError("aggregate_intra_bars() must return MultiIndex columns like (asset, metric).")
-        metrics = set(daily_mkt.columns.get_level_values(1))
-        if "open" not in metrics or "close" not in metrics:
-            raise ValueError("aggregate_intra_bars() output must include metrics 'open' and 'close'.")
+        # drop return columns from features (optional but usually desired)
+        drop_cols = [c for c in X.columns if c.endswith("_ret_cc") or c.endswith("_ret_oo")]
+        if drop_cols:
+            X = X.drop(columns=drop_cols)
 
-        # 5) daily open/close (in market tz), then convert index back to UTC
-        daily_open_mkt = daily_mkt.xs("open", level=1, axis=1)
-        daily_close_mkt = daily_mkt.xs("close", level=1, axis=1)
-
-        daily_open = daily_open_mkt.tz_convert("UTC")
-        daily_close = daily_close_mkt.tz_convert("UTC")
-
-        # 6) returns
-        ret_cc = compute_returns(daily_close, kind=return_kind)
-        ret_oo = compute_returns(daily_open, kind=return_kind)
-
-        # 7) features: rvol from daily_mkt (market tz), then convert to UTC index
-        X_parts: list[pd.DataFrame] = []
-        if "rvol" in metrics:
-            rvol_mkt = daily_mkt.xs("rvol", level=1, axis=1)
-            rvol = rvol_mkt.tz_convert("UTC")
-            rvol.columns = [f"{c}_rvol" for c in rvol.columns]
-            X_parts.append(rvol)
-
-        X = pd.concat(X_parts, axis=1) if X_parts else pd.DataFrame(index=daily_close.index)
-
-        # 8) required feature columns check
+        # required columns check (expects flattened names)
         if required_cols:
             missing = [c for c in required_cols if c not in X.columns]
             if missing:
-                raise ValueError(f"Missing required feature columns: {missing}")
+                raise ValueError(
+                    f"Missing required feature columns after flattening: {missing}\n"
+                    f"Available (sample): {list(X.columns)[:20]}"
+                )
 
-        # 9) align indices (drop last day because of shift(-1) -> NaN)
-        idx = daily_close.index
-        idx = idx.intersection(ret_cc.dropna(how="all").index)
-        idx = idx.intersection(ret_oo.dropna(how="all").index)
-        idx = idx.intersection(X.index)
-
-        daily_open = daily_open.loc[idx]
-        daily_close = daily_close.loc[idx]
-        ret_cc = ret_cc.loc[idx]
-        ret_oo = ret_oo.loc[idx]
-        X = X.reindex(idx)
+        # align
+        idx = ret_wide.index.intersection(X.index)
+        ret_wide = ret_wide.loc[idx].dropna(how="all")
+        X = X.loc[ret_wide.index]
 
         return ModelInputs(
-            ret=ret_oo,   # execution return stream (open->open aligned to decision day t)
-            features=X,   # features indexed on same day t (UTC)
+            ret=ret_wide,
+            features=X,
         )

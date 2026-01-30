@@ -122,7 +122,7 @@ def aggregate_intra_bars(
               .agg(
                   open=("open_src", "first"),
                   close=("close_src", "last"),
-                  ret=("r", "sum"),
+                #   ret=("r", "sum"),
                   rvar=("r_sq", "sum"),
                   n_intra=("r", "count"),
               )

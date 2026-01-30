@@ -22,7 +22,7 @@ class RunSpec:
     tag: str | None = None
 
     # data + features
-    data: dict[str, Any] = field(default_factory=dict)
+    data_path: str = None 
     features: dict[str, Any] = field(default_factory=dict)
 
     # strategy behavior

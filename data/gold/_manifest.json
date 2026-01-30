@@ -1,0 +1,93 @@
+{
+  "dataset": "gold_model_table",
+  "format": "wide_flat",
+  "created_at_utc": "2026-01-30T22:19:04.114441+00:00",
+  "spec_hash": "728767dacb",
+  "spec": {
+    "root": "data/bronze",
+    "assets": [
+      "SPY",
+      "XLE"
+    ],
+    "bar_freq": "15Min",
+    "out_dir": "data/gold",
+    "file_format": "parquet",
+    "timestamp_col": "timestamp",
+    "fields": [
+      "open",
+      "close"
+    ],
+    "market_tz": "America/New_York",
+    "cutoff_hour": 14.0,
+    "agg_freq": "1B",
+    "return_kind": "log",
+    "include_rvol": true
+  },
+  "shape": {
+    "rows": 1255,
+    "cols": 12,
+    "assets": 2,
+    "start_date_utc": "2021-01-04T00:00:00+00:00",
+    "end_date_utc": "2026-01-02T00:00:00+00:00"
+  },
+  "index": {
+    "name": "timestamp",
+    "dtype": "datetime64[ns, UTC]",
+    "tz": "UTC"
+  },
+  "columns": [
+    {
+      "name": "('SPY', 'close')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('SPY', 'open')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('SPY', 'ret_cc')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('SPY', 'ret_oo')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('SPY', 'rvar')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('SPY', 'rvol')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('XLE', 'close')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('XLE', 'open')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('XLE', 'ret_cc')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('XLE', 'ret_oo')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('XLE', 'rvar')",
+      "dtype": "float64"
+    },
+    {
+      "name": "('XLE', 'rvol')",
+      "dtype": "float64"
+    }
+  ],
+  "asof_convention": "Row at date=t contains fields/features computed using data available up to t. Execution shifting should happen in portfolio simulation (weights shifted to t+1).",
+  "paths": {
+    "model_parquet": "data/gold/model.parquet",
+    "manifest_json": "data/gold/_manifest.json"
+  }
+}
