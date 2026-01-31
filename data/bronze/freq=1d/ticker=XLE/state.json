@@ -1,0 +1,11 @@
+{
+  "config_fingerprint": "d6ef664ecfe15749f401f2640c3ad8ec76bfeabb85f6c9077378f10c7e865674",
+  "dataset_end": "2026-01-30T00:00:00+00:00",
+  "dataset_start": "2021-01-04T00:00:00+00:00",
+  "last_success_utc": "2026-01-31T17:11:26.233570+00:00",
+  "pull_end": "2026-01-31T17:11:25.972117+00:00",
+  "pull_start": "2025-12-30T00:00:00+00:00",
+  "rows_in_pull_window": 22,
+  "rows_total": 1275,
+  "store_key": "data/bronze/freq=1d/ticker=XLE/state.json"
+}

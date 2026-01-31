@@ -9,8 +9,9 @@ from qbt.storage.storage import Storage
 from qbt.storage.paths import StoragePaths
 from qbt.data.sources.source_registry import create_source, available_sources
 from qbt.data.state import get_last_available_date, compute_fetch_window, update_state
-from qbt.core.logging import get_logger
+from qbt.data.merge import merge_and_dedup
 
+from qbt.core.logging import get_logger
 logging = get_logger(__name__)
 
 
@@ -18,15 +19,15 @@ logging = get_logger(__name__)
 def ingest_one_source(storage: Storage, paths: StoragePaths, cfg: dict, dataset_name: str, source_cfg: dict) -> dict:
     ingestion_cfg = cfg.get("ingestion", {}) or {}
 
+    mode = ingestion_cfg.get('mode')
+    lookback = ingestion_cfg.get('lookback_days')
+    start_override = ingestion_cfg.get('start_override', None)
+    end_override = ingestion_cfg.get('end_override', None)
+
+
     provider = source_cfg.get("provider")
     if not provider:
         raise ValueError(f"{dataset_name}: missing provider")
-
-    mode = source_cfg.get('mode')
-    lookback = source_cfg.get('lookback_days')
-    start_override = source_cfg.get('start', None)
-    end_override = source_cfg.get('end', None)
-
 
     # cfg-only: pass the *whole* source_cfg into the source
     # (this is where api_key/api_secret can live if you merged them in the entrypoint)
@@ -51,10 +52,13 @@ def ingest_one_source(storage: Storage, paths: StoragePaths, cfg: dict, dataset_
         if not ticker:
             continue
 
-        store_key = paths.bronze_bars_key(ticker=ticker, freq=freq)
+        store_key = paths.bronze_bars_key(freq=freq, ticker=ticker)
+        state_key = paths.bronze_bars_state(freq=freq, ticker=ticker)
 
 
-        last_date = get_last_available_date(storage, store_key)
+
+        last_date = get_last_available_date(storage, state_key)
+
 
         fetch_start, fetch_end = compute_fetch_window(
                                                     last_date=last_date,
@@ -72,21 +76,34 @@ def ingest_one_source(storage: Storage, paths: StoragePaths, cfg: dict, dataset_
 
         # if a source needs ticker in cfg instead of as arg, it can read it from cfg
         # but this keeps a clean canonical signature.
-        df = src.fetch(ticker=ticker, start=fetch_start, end=fetch_end)
-        df = src.standardize(df)
-        src.validate(df)
+        new_df = src.fetch(ticker=ticker, start=fetch_start, end=fetch_end)
+        new_df = src.standardize(new_df)
+        src.validate(new_df)
 
-    
-        storage.write_parquet(df, store_key)
+
+        if storage.exists(store_key):
+            old_df = storage.read_parquet(store_key)
+            merged = merge_and_dedup(old_df, new_df)
+        else:
+            merged = new_df
+
+        storage.write_parquet(merged, store_key)
 
         logging.debug(
             "SOURCE %s | dataset=%s | ticker=%s | rows=%d | stored_at=%s",
-            provider, dataset_name, ticker, len(df), store_key
+            provider, dataset_name, ticker, len(merged), store_key
         )
 
-        update_state(storage, store_key, df, fetch_start, fetch_end)
+        update_state(
+            storage,
+            state_key,
+            merged,
+            pull_start=fetch_start,
+            pull_end=fetch_end,
+            meta={"ingestion": ingestion_cfg, "source": source_cfg},
+        )
 
-        results_per_ticker[ticker] = {"store_key": store_key, "rows_new": int(len(df))}
+        results_per_ticker[ticker] = {"store_key": store_key, "rows_new": int(len(new_df))}
 
     return {
         "dataset": dataset_name,
@@ -96,7 +113,7 @@ def ingest_one_source(storage: Storage, paths: StoragePaths, cfg: dict, dataset_
     }
 
 
-def ingest(storage: Storage, paths:StoragePaths, cfg: dict) -> dict:
+def ingest_all_sources(storage: Storage, paths:StoragePaths, cfg: dict) -> dict:
     logging.debug("Using Storage %s base_dir=%s", storage, getattr(storage, "base_dir", None))
     logging.debug("Available Sources: %s", available_sources())
 

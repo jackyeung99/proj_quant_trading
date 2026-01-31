@@ -1,0 +1,11 @@
+{
+  "config_fingerprint": "5034dc3cf98e3c62db6dc7e9a3ebc84c186e5639f88a28f68ca1f17c87bf7b2a",
+  "dataset_end": "2026-01-29T00:00:00+00:00",
+  "dataset_start": "2021-01-01T00:00:00+00:00",
+  "last_success_utc": "2026-01-31T17:11:27.087759+00:00",
+  "pull_end": "2026-01-31T17:11:26.992123+00:00",
+  "pull_start": "2025-12-31T00:00:00+00:00",
+  "rows_in_pull_window": 22,
+  "rows_total": 1325,
+  "store_key": "data/bronze/freq=1d/ticker=DGS10/state.json"
+}

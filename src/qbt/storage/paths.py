@@ -38,6 +38,12 @@ class StoragePaths:
     # ----- bronze keys -----
     def bronze_bars_key(self, *, freq: str, ticker: str) -> str:
         return f"{self.bronze}/freq={freq}/ticker={ticker}/bars.parquet"
+    
+    def bronze_bars_dir(self, *, freq: str, ticker: str) -> str:
+        return f"{self.bronze}/freq={freq}/ticker={ticker}"
+    
+    def bronze_bars_state(self, *, freq: str, ticker: str) -> str:
+         return f"{self.bronze}/freq={freq}/ticker={ticker}/state.json"
 
     # ----- silver keys -----
     def silver_bars_key(self, *, freq: str, ticker: str) -> str:

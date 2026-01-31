@@ -3,10 +3,11 @@ storage:
   base_dir: "."
 
 ingestion:
+  enabled: True
   mode: append  # full or append
   lookback_days: 1
-  start: "2021-01-01"
-  end: "2026-01-01"
+  # start_override: "2021-01-01"
+  # end_override: "2026-01-01"
 
 sources:
 
@@ -30,5 +31,10 @@ sources:
     symbols: ["VIXCLS", "DGS10", "DGS2"]
     interval: "1d"
 
-paths:
-  prefix: "data/bronze/"
+
+silver: 
+  enabled: False 
+
+
+gold:
+  enabled: False
