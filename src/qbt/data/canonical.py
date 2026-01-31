@@ -9,7 +9,7 @@ def canonicalize_bars(
     df: pd.DataFrame,
     *,
     timestamp_col: str = "timestamp",
-    tz: str = "UTC",
+    tz_out: str = "UTC",
     require_cols: tuple[str, ...] = ("open", "high", "low", "close"),
 ) -> pd.DataFrame:
     out = df.copy()
@@ -53,52 +53,54 @@ def canonicalize_macro(
     timestamp_col: str = "timestamp",
     name_col: str = "name",
     value_col: str = "value",
-    tz: str = "UTC",
+    out_dt_col: str = "datetime",
+    out_ticker_col: str = "ticker",
+    out_close_col: str = "close",
 ) -> pd.DataFrame:
     """
-    Canonicalize a macro time series table.
+    Canonicalize a macro long table to bars-like schema:
 
-    Expected input (long):
-        timestamp | name | value
+        datetime | ticker | close
 
-    Output invariants:
-    - timestamp tz-aware (UTC)
-    - unique (name, timestamp)
-    - sorted by (name, timestamp)
-    - numeric value
+    Invariants:
+    - datetime tz-aware UTC
+    - ticker string (stripped, upper)
+    - close numeric (float)
+    - unique (ticker, datetime), keep="last"
+    - sorted by (ticker, datetime)
     """
+    if df is None or len(df) == 0:
+        return pd.DataFrame(columns=[out_dt_col, out_ticker_col, out_close_col])
 
-    if df is None:
-        return pd.DataFrame(columns=[timestamp_col, name_col, value_col])
+    # Fail fast if required columns missing (cleaner than silently creating NA columns)
+    missing = [c for c in (timestamp_col, name_col, value_col) if c not in df.columns]
+    if missing:
+        raise ValueError(f"canonicalize_macro missing columns: {missing}")
 
-    out = df.copy()
+    out = df[[timestamp_col, name_col, value_col]].copy()
 
-    # --- ensure required columns exist ---
-    for c in (timestamp_col, name_col, value_col):
-        if c not in out.columns:
-            out[c] = pd.NA
+    # datetime (UTC, tz-aware)
+    out[out_dt_col] = pd.to_datetime(out[timestamp_col], utc=True, errors="coerce")
 
-    # --- timestamp parsing ---
-    out[timestamp_col] = pd.to_datetime(
-        out[timestamp_col],
-        errors="coerce",
-        utc=True,
+    # ticker
+    out[out_ticker_col] = (
+        out[name_col]
+        .astype("string")
+        .str.strip()
+        .str.upper()
     )
 
-    # --- name normalization ---
-    out[name_col] = out[name_col].astype(str)
+    # close
+    out[out_close_col] = pd.to_numeric(out[value_col], errors="coerce")
 
-    # --- value normalization ---
-    out[value_col] = pd.to_numeric(out[value_col], errors="coerce")
+    # drop bad keys
+    out = out.dropna(subset=[out_dt_col, out_ticker_col])
 
-    # --- drop rows missing keys ---
-    out = out.dropna(subset=[timestamp_col, name_col])
-
-    # --- sort + dedupe ---
+    # sort + dedupe
     out = (
-        out.sort_values([name_col, timestamp_col])
-           .drop_duplicates([name_col, timestamp_col], keep="last")
+        out.sort_values([out_ticker_col, out_dt_col])
+           .drop_duplicates([out_ticker_col, out_dt_col], keep="last")
            .reset_index(drop=True)
     )
 
-    return out[[timestamp_col, name_col, value_col]]
+    return out[[out_dt_col, out_ticker_col, out_close_col]]

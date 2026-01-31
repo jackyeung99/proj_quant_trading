@@ -3,7 +3,7 @@ storage:
   base_dir: "."
 
 ingestion:
-  enabled: True
+  enabled: False
   mode: append  # full or append
   lookback_days: 1
   # start_override: "2021-01-01"
@@ -33,7 +33,7 @@ sources:
 
 
 silver: 
-  enabled: False 
+  enabled: True 
 
 
 gold:
