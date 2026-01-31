@@ -3,12 +3,12 @@
   "assets": [
     "XLE"
   ],
-  "created_at_utc": "2026-01-31T19:25:46.645129+00:00",
+  "created_at_utc": "2026-01-31T19:25:30.566396+00:00",
   "dataset": "gold_long_table",
   "freq": "1D",
   "paths": {
-    "manifest_json": "data/gold/freq=1D/tag=trade-same-day-3/_manifest.json",
-    "table_parquet": "data/gold/freq=1D/tag=trade-same-day-3/table.parquet"
+    "manifest_json": "data/gold/freq=1D/tag=trade-same-day-12/_manifest.json",
+    "table_parquet": "data/gold/freq=1D/tag=trade-same-day-12/table.parquet"
   },
   "schema": {
     "columns": [
@@ -141,7 +141,7 @@
       "assets": [
         "XLE"
       ],
-      "cutoff_hour": 15.0,
+      "cutoff_hour": 12.0,
       "daily_transforms": [
         {
           "col": "close",
@@ -245,6 +245,6 @@
       "market_tz": "America/New_York"
     }
   },
-  "spec_hash": "2907d94fec459e81",
-  "tag": "trade-same-day-3"
+  "spec_hash": "6bf9ee4862b62d63",
+  "tag": "trade-same-day-12"
 }

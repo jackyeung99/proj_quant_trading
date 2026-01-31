@@ -57,28 +57,72 @@ class DefaultDataAdapter(DataAdapter):
         return df
 
     def prepare(self, raw: pd.DataFrame, spec: RunSpec, required_cols: list[str]) -> ModelInputs:
-        if not isinstance(raw.columns, pd.MultiIndex):
-            raise ValueError("Expected raw to have MultiIndex columns: (asset, field).")
+        """
+        raw: LONG gold table with columns like:
+            ['timestamp', 'ticker', 'open', 'high', 'low', 'close', 'volume', 'ret_cc', 'rv', ...]
 
-        # pick return stream
-        fields = set(raw.columns.get_level_values(1))
+        Output:
+        - ret: wide (index=timestamp, columns=tickers)
+        - features: wide flattened (index=timestamp, columns="<ticker>_<feature>")
+        """
+        df = raw.copy()
+
+        # ---- normalize timestamp index ----
+        if "timestamp" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+            df = df.dropna(subset=["timestamp"])
+            df = df.set_index("timestamp")
+        elif not isinstance(df.index, pd.DatetimeIndex):
+            raise ValueError("Expected raw to have a 'timestamp' column or a DatetimeIndex.")
+
+        if "ticker" not in df.columns:
+            raise ValueError("Expected raw long table to have a 'ticker' column.")
+
+        df = df.sort_index()
+        df["ticker"] = df["ticker"].astype("string")
+
+        # ---- pivot long -> wide MultiIndex columns: (ticker, field) ----
+        value_cols = [c for c in df.columns if c != "ticker"]
+        if not value_cols:
+            raise ValueError("No value columns found to pivot (everything except 'ticker').")
+
+        wide = (
+            df.reset_index()
+            .melt(
+                id_vars=["timestamp", "ticker"],
+                value_vars=value_cols,
+                var_name="field",
+                value_name="value",
+            )
+            .pivot_table(
+                index="timestamp",
+                columns=["ticker", "field"],
+                values="value",
+                aggfunc="last",
+            )
+            .sort_index()
+            .sort_index(axis=1)
+        )
+
+        # ---- pick return stream ----
+        fields = set(wide.columns.get_level_values(1))
         ret_field = "ret_oo" if "ret_oo" in fields else "ret_cc"
         if ret_field not in fields:
-            raise ValueError("Missing return field: expected 'ret_oo' or 'ret_cc' in raw columns.")
+            raise ValueError("Missing return field: expected 'ret_oo' or 'ret_cc'.")
 
-        # wide returns (date x assets)
-        ret_wide = raw.xs(ret_field, level=1, axis=1).sort_index().sort_index(axis=1)
+        # wide returns (timestamp x tickers)
+        ret_wide = wide.xs(ret_field, level=1, axis=1).sort_index().sort_index(axis=1)
 
-        # flatten ALL columns into "<asset>_<field>"
-        X = raw.copy().sort_index().sort_index(axis=1, level=[0, 1])
+        # ---- features: flatten ALL columns into "<ticker>_<field>" ----
+        X = wide.copy().sort_index().sort_index(axis=1, level=[0, 1])
         X.columns = [f"{a}_{f}" for a, f in X.columns]
 
-        # drop return columns from features (optional but usually desired)
+        # drop return columns from features
         drop_cols = [c for c in X.columns if c.endswith("_ret_cc") or c.endswith("_ret_oo")]
         if drop_cols:
             X = X.drop(columns=drop_cols)
 
-        # required columns check (expects flattened names)
+        # ---- required columns check (expects flattened names) ----
         if required_cols:
             missing = [c for c in required_cols if c not in X.columns]
             if missing:
@@ -87,7 +131,7 @@ class DefaultDataAdapter(DataAdapter):
                     f"Available (sample): {list(X.columns)[:20]}"
                 )
 
-        # align
+        # ---- align ----
         idx = ret_wide.index.intersection(X.index)
         ret_wide = ret_wide.loc[idx].dropna(how="all")
         X = X.loc[ret_wide.index]

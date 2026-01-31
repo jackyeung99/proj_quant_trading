@@ -6,14 +6,7 @@ tag: rv_regime_15m
 assets:
   - XLE
 
-data_path: 'data/gold/model.parquet'
-
-features:
-  pipeline: intraday_ohlcv_v1
-  return_kind: log
-  rv_windows: [5, 20]
-  mom_windows: [20, 60]
-
+data_path: 'data/gold/freq=1D/tag=trade-next-day/table.parquet'
 
 params:
   state_var: XLE_rvol

@@ -37,10 +37,11 @@ def run_spec(cfg: dict, bt_spec_df: dict, store: ArtifactsStore, bt: BacktestEng
     store.write_run(result.meta, result.timeseries, result.metrics)
     print("Wrote run:", result.meta.run_id, "|", spec.strategy_name, "|", spec.universe, "| tag:", spec.tag)
 
+
 def main():
     # --- storage ---
     storage = LocalStorage(base_dir=Path("."))
-    paths = StoragePaths(root="results")
+    paths = StoragePaths()
     store = ArtifactsStore(storage, paths)
 
     # --- engine ---
@@ -52,14 +53,38 @@ def main():
 
     # --- base configs (template YAMLs) ---
     base_buyhold = load_yaml("configs/strategies/run_buyhold.yaml")
-    base_state = load_yaml("configs/strategies/run_state.yaml")
-
     run_spec(base_buyhold, bt_cfg, store, bt)
 
 
-    state_vars = ['XLE_rvar', 'XLE_rvol']
-    run_spec(base_state, bt_cfg, store, bt)
+    base_state = load_yaml("configs/strategies/run_state.yaml")
+    state_vars = [
+                "XLE_rv", "XLE_rvol", 
+                # "XLE_jump_var", "XLE_ewma_vol_20", "XLE_mom_20", "XLE_mom_60", "XLE_trend_slope_60", "XLE_pk_vol"
+                  ]
+    
+    cutoffs = ["data/gold/freq=1D/tag=trade-same-day-12/table.parquet", "data/gold/freq=1D/tag=trade-same-day-3/table.parquet", "data/gold/freq=1D/tag=trade-next-day/table.parquet"]
+    
+    times = ["12 PM ET", "3PM ET", "9 AM ET Next Day"]
 
+    for cutoff_path, time  in zip(cutoffs, times):
+    
+        for sv in state_vars:
+            cfg = copy.deepcopy(base_state)
+
+            cfg["data_path"] = cutoff_path
+            cfg["params"]["state_var"] = sv
+
+            # NEW PARAM: you choose the param name your strategy/backtest reads
+            cfg["params"]["trade_time_et"] = time  # e.g., 3.0, 12.0, or None
+
+            # tag includes both cutoff + state var
+            cfg["tag"] = f"{cfg.get('tag','run')}_{time}_{sv}"
+
+            run_spec(cfg, bt_cfg, store, bt)
+
+
+
+    
 
 
 if __name__ == "__main__":

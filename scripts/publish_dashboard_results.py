@@ -14,7 +14,7 @@ DASH_REPO = MAIN_REPO.parent / "qbt_dashboard"
 SRC_ROOT = MAIN_REPO            
 DST_ROOT = DASH_REPO
 
-paths = StoragePaths(root="results")
+paths = StoragePaths()
 
 
 # --------------------
@@ -58,7 +58,7 @@ def main():
     if not DASH_REPO.exists():
         raise RuntimeError(f"Dashboard repo not found: {DASH_REPO}")
 
-    dst_results = DST_ROOT / paths.root
+    dst_results = DST_ROOT / paths.results
 
     print("Cleaning dashboard results directory...")
     if dst_results.exists():
@@ -84,14 +84,14 @@ def main():
         print(f"Missing: {src_metrics}")
 
     # ---- export meta + timeseries ----
-    ts_root = SRC_ROOT / paths.root / "timeseries"
-    runs_root = SRC_ROOT / paths.root / "runs"
+    ts_root = SRC_ROOT / paths.results / "timeseries"
+    runs_root = SRC_ROOT / paths.results / "runs"
 
     if runs_root.exists():
         for run_dir in runs_root.iterdir():
             meta_src = run_dir / "meta.json"
             if meta_src.exists():
-                meta_dst = DST_ROOT / paths.root / "runs" / run_dir.name / "meta.json"
+                meta_dst = DST_ROOT / paths.results / "runs" / run_dir.name / "meta.json"
                 copy_json(meta_src, meta_dst)
 
     if ts_root.exists():
