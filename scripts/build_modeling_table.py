@@ -341,7 +341,7 @@ def write_gold_model_table(df: pd.DataFrame, spec: BuildSpec, *, spec_hash: str)
 def main() -> None:
     spec = BuildSpec(
         root=Path("data/bronze"),  # <-- change to your base (bronze or silver)
-        assets=("XLE", "SPY" ),  # <-- set your assets
+        assets=("XLE",  ),  # <-- set your assets
         bar_freq="15Min",
         out_dir=Path("data/gold/"),
         file_format="parquet",

@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 
 from qbt.storage.storage import LocalStorage
-from qbt.data.ingestion import ingest
+from qbt.pipeline.ingestion import ingest
 from qbt.core.logging import setup_logging
 
 

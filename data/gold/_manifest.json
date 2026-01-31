@@ -1,12 +1,11 @@
 {
   "dataset": "gold_model_table",
   "format": "wide_flat",
-  "created_at_utc": "2026-01-30T22:19:04.114441+00:00",
-  "spec_hash": "728767dacb",
+  "created_at_utc": "2026-01-30T22:21:27.972771+00:00",
+  "spec_hash": "e8227d08cc",
   "spec": {
     "root": "data/bronze",
     "assets": [
-      "SPY",
       "XLE"
     ],
     "bar_freq": "15Min",
@@ -25,8 +24,8 @@
   },
   "shape": {
     "rows": 1255,
-    "cols": 12,
-    "assets": 2,
+    "cols": 6,
+    "assets": 1,
     "start_date_utc": "2021-01-04T00:00:00+00:00",
     "end_date_utc": "2026-01-02T00:00:00+00:00"
   },
@@ -36,30 +35,6 @@
     "tz": "UTC"
   },
   "columns": [
-    {
-      "name": "('SPY', 'close')",
-      "dtype": "float64"
-    },
-    {
-      "name": "('SPY', 'open')",
-      "dtype": "float64"
-    },
-    {
-      "name": "('SPY', 'ret_cc')",
-      "dtype": "float64"
-    },
-    {
-      "name": "('SPY', 'ret_oo')",
-      "dtype": "float64"
-    },
-    {
-      "name": "('SPY', 'rvar')",
-      "dtype": "float64"
-    },
-    {
-      "name": "('SPY', 'rvol')",
-      "dtype": "float64"
-    },
     {
       "name": "('XLE', 'close')",
       "dtype": "float64"

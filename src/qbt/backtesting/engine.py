@@ -126,7 +126,7 @@ class BacktestEngine:
             universe=spec.universe,
             created_at_utc=datetime.now(timezone.utc).isoformat(),
             # store the YAML blocks so you can reproduce runs exactly
-            data_path=str(spec.data.get("path") or spec.data.get("price_path") or ""),
+            data_path=str(spec.data_path) or "",
             weight_lag=bt.weight_lag,
             params=spec.params or {},
             tag=spec.tag,

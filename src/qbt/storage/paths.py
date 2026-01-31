@@ -28,25 +28,50 @@ class StoragePaths:
     - This returns *keys* (POSIX-like strings), not local filesystem Paths.
     - Your Storage backend decides how keys map to Local paths or S3 URIs.
     """
-    root: str = "results"  # key prefix inside storage
+    results: str = "results"  # key prefix inside storage
+    bronze: str = "data/bronze"
+    silver: str = "data/silver"
+    gold: str = "data/gold"
+    state: str = "data/_state"
+
+
+    # ----- bronze keys -----
+    def bronze_bars_key(self, *, freq: str, ticker: str) -> str:
+        return f"{self.bronze}/freq={freq}/ticker={ticker}/bars.parquet"
+
+    # ----- silver keys -----
+    def silver_bars_key(self, *, freq: str, ticker: str) -> str:
+        return f"{self.silver}/freq={freq}/ticker={ticker}/bars.parquet"
+
+    # ----- gold keys -----
+    def gold_model_key(self, *, universe: str, freq: str = "1D") -> str:
+        return f"{self.gold}/model_table/universe={universe}/freq={freq}/model.parquet"
+
+    def gold_manifest_key(self, *, universe: str, freq: str = "1D") -> str:
+        return f"{self.gold}/model_table/universe={universe}/freq={freq}/_manifest.json"
+
+    # ----- state keys -----
+    def source_state_key(self, *, source: str, dataset: str) -> str:
+        return f"{self.state}/{source}/{dataset}.json"
+    
 
     # ---- global artifacts ----
     def runs_key(self) -> str:
-        return str(PurePosixPath(self.root) / "runs.parquet")
+        return str(PurePosixPath(self.results) / "runs.parquet")
 
     def metrics_key(self) -> str:
-        return str(PurePosixPath(self.root) / "metrics.parquet")
+        return str(PurePosixPath(self.results) / "metrics.parquet")
 
 
     # ---- per-run artifacts ----
     def run_meta_key(self, run_id: str) -> str:
-        return str(PurePosixPath(self.root) / "runs" / _clean(run_id) / "meta.json")
+        return str(PurePosixPath(self.results) / "runs" / _clean(run_id) / "meta.json")
 
     def run_timeseries_key(self, strategy: str, universe: str, run_id: str) -> str:
         """
         One file per run (MVP). Partition-style folders help filtering/query later.
         """
-        base = PurePosixPath(self.root) / "timeseries"
+        base = PurePosixPath(self.results) / "timeseries"
         p = (
             base
             / f"strategy={_clean(strategy)}"

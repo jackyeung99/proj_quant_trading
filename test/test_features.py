@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from qbt.features.feature_engineering import aggregate_intra_bars as m
+from qbt.features.aggregations import aggregate_intra_bars as m
 
 
 

@@ -3,6 +3,8 @@ storage:
   base_dir: "."
 
 ingestion:
+  mode: append  # full or append
+  lookback_days: 1
   start: "2021-01-01"
   end: "2026-01-01"
 
