@@ -1,125 +1,200 @@
-
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
-import numpy as np 
-import statsmodels.api as sm
 
 
-
-def compute_returns(prices: pd.DataFrame, kind: str = "log") -> pd.DataFrame:
-    if kind == "log":
-        return np.log(prices).diff()
-    if kind == "simple":
-        return prices.pct_change()
-    raise ValueError(f"Unknown return_kind={kind}")
-
-def rolling_realized_vol(ret: pd.DataFrame, window: int) -> pd.DataFrame:
-    # simple RV proxy at bar frequency: sqrt(sum(r^2))
-    return (ret.pow(2).rolling(window).sum()).pow(0.5)
-
-def rolling_realized_var(ret: pd.DataFrame, window: int) -> pd.DataFrame:
-    # simple RV proxy at bar frequency: sqrt(sum(r^2))
-    return ret.pow(2).rolling(window).sum()
-
-def momentum(prices: pd.DataFrame, window: int) -> pd.DataFrame:
-    # log momentum
-    return np.log(prices).diff(window)
-
-
-def estimate_idiosyncratic_multiindex(
-    daily: pd.DataFrame,
+def returns(
+    df: pd.DataFrame,
     *,
-    target: str = "XLE",
-    benchmark: str = "SPY",
-    window: int = 260,
-    return_kind: str = "log",
-    close_field: str = "close",
+    col: str = "close",
+    kind: str = "log",
+    out: str = "ret_1",
 ) -> pd.DataFrame:
-    """
-    Compute rolling CAPM-style idiosyncratic residuals BEFORE flattening.
-
-    Parameters
-    ----------
-    daily : DataFrame
-        WIDE daily table with MultiIndex columns (asset, field).
-        Must contain (target, close_field) and (benchmark, close_field).
-    target, benchmark : str
-        Asset tickers/names as they appear in the column level 0.
-    window : int
-        Rolling regression window length.
-    return_kind : {"log","simple"}
-        Return type used for r_t series.
-    close_field : str
-        Field name for close prices in level 1.
-
-    Returns
-    -------
-    out : DataFrame
-        Same as input but with two additional columns:
-          (target, f"beta_{benchmark}")
-          (target, f"idio_{benchmark}")
-    """
-    if not isinstance(daily.columns, pd.MultiIndex):
-        raise ValueError("daily must have MultiIndex columns: (asset, field).")
-
-    needed = {(target, close_field), (benchmark, close_field)}
-    missing = [c for c in needed if c not in daily.columns]
-    if missing:
-        raise ValueError(f"Missing required columns for idio calc: {missing}")
-
-    out = daily.copy()
-
-    # --- compute returns from close prices (aligned, wide Series) ---
-    p_t = out[(target, close_field)].astype(float)
-    p_b = out[(benchmark, close_field)].astype(float)
-
-    if return_kind == "log":
-        r_t = np.log(p_t).diff()
-        r_b = np.log(p_b).diff()
-    elif return_kind == "simple":
-        r_t = p_t.pct_change()
-        r_b = p_b.pct_change()
+    s = pd.to_numeric(df[col], errors="coerce").astype(float)
+    if kind == "log":
+        df[out] = np.log(s).diff()
+    elif kind == "simple":
+        df[out] = s.pct_change()
     else:
-        raise ValueError("return_kind must be 'log' or 'simple'.")
+        raise ValueError(f"returns.kind must be 'log' or 'simple', got {kind}")
+    return df
 
-    # Prepare output series
-    beta = pd.Series(np.nan, index=out.index, name=(target, f"beta_{benchmark}"))
-    idio = pd.Series(np.nan, index=out.index, name=(target, f"idio_{benchmark}"))
 
-    # --- rolling regression ---
-    # We need enough rows and finite values
-    for i in range(window, len(out.index)):
-        yt = r_t.iloc[i - window:i]
-        xb = r_b.iloc[i - window:i]
+def momentum(
+    df: pd.DataFrame,
+    *,
+    col: str = "close",
+    windows: list[int] = [20],
+    prefix: str = "mom_",
+) -> pd.DataFrame:
+    s = pd.to_numeric(df[col], errors="coerce").astype(float)
+    for w in windows:
+        df[f"{prefix}{w}"] = s / s.shift(w) - 1.0
+    return df
 
-        # drop NaNs inside window
-        w = pd.concat([yt, xb], axis=1).dropna()
-        if len(w) < max(20, window // 5):  # minimal robustness threshold
-            continue
 
-        y = w.iloc[:, 0]
-        x = w.iloc[:, 1]
-        X = sm.add_constant(x, has_constant="add")
+def rolling_mean(
+    df: pd.DataFrame,
+    *,
+    col: str = "close",
+    windows: list[int] = [20],
+    prefix: str = "sma_",
+    min_periods: int | None = None,
+) -> pd.DataFrame:
+    s = pd.to_numeric(df[col], errors="coerce").astype(float)
+    for w in windows:
+        mp = w if min_periods is None else min_periods
+        df[f"{prefix}{w}"] = s.rolling(w, min_periods=mp).mean()
+    return df
 
-        res = sm.OLS(y, X).fit()
 
-        alpha = float(res.params.get("const", res.params.iloc[0]))
-        beta_i = float(res.params.iloc[1])
+def rolling_std(
+    df: pd.DataFrame,
+    *,
+    col: str = "ret_1",
+    windows: list[int] = [20],
+    prefix: str = "vol_",
+    min_periods: int | None = None,
+    annualize: bool = False,
+    periods_per_year: float = 252.0,
+) -> pd.DataFrame:
+    s = pd.to_numeric(df[col], errors="coerce").astype(float)
+    for w in windows:
+        mp = w if min_periods is None else min_periods
+        v = s.rolling(w, min_periods=mp).std(ddof=1)
+        if annualize:
+            v = v * np.sqrt(periods_per_year)
+        df[f"{prefix}{w}"] = v
+    return df
 
-        beta.iloc[i] = beta_i
 
-        # idio at time i uses current returns (must be finite)
-        rt_i = r_t.iloc[i]
-        rb_i = r_b.iloc[i]
-        if np.isfinite(rt_i) and np.isfinite(rb_i):
-            idio.iloc[i] = float(rt_i - (alpha + beta_i * rb_i))
+def ewma_vol(
+    df: pd.DataFrame,
+    *,
+    col: str = "ret_1",
+    span: int = 20,
+    out: str = "ewma_vol",
+    annualize: bool = False,
+    periods_per_year: float = 252.0,
+) -> pd.DataFrame:
+    s = pd.to_numeric(df[col], errors="coerce").astype(float)
+    # EWMA variance then sqrt
+    var = s.ewm(span=span, adjust=False).var(bias=False)
+    vol = np.sqrt(var)
+    if annualize:
+        vol = vol * np.sqrt(periods_per_year)
+    df[out] = vol
+    return df
 
-    # attach to out as MultiIndex columns
-    out[(target, f"beta_{benchmark}")] = beta.values
-    out[(target, f"idio_{benchmark}")] = idio.values
 
-    # keep column order tidy
-    out = out.sort_index(axis=1, level=[0, 1])
+def rolling_sharpe(
+    df: pd.DataFrame,
+    *,
+    ret_col: str = "ret_1",
+    windows: list[int] = [63],
+    prefix: str = "sharpe_",
+    annualize: bool = True,
+    periods_per_year: float = 252.0,
+    min_periods: int | None = None,
+) -> pd.DataFrame:
+    r = pd.to_numeric(df[ret_col], errors="coerce").astype(float)
+    for w in windows:
+        mp = w if min_periods is None else min_periods
+        mu = r.rolling(w, min_periods=mp).mean()
+        sd = r.rolling(w, min_periods=mp).std(ddof=1)
+        sh = mu / sd
+        if annualize:
+            sh = sh * np.sqrt(periods_per_year)
+        df[f"{prefix}{w}"] = sh
+    return df
 
-    return out
+
+def max_drawdown(
+    df: pd.DataFrame,
+    *,
+    col: str = "close",
+    window: int = 252,
+    out: str = "mdd_252",
+    min_periods: int | None = None,
+) -> pd.DataFrame:
+    s = pd.to_numeric(df[col], errors="coerce").astype(float)
+    mp = window if min_periods is None else min_periods
+    roll_max = s.rolling(window, min_periods=mp).max()
+    dd = s / roll_max - 1.0
+    df[out] = dd.rolling(window, min_periods=mp).min()
+    return df
+
+
+def zscore(
+    df: pd.DataFrame,
+    *,
+    col: str = "ret_1",
+    window: int = 60,
+    out: str = "z_60",
+    min_periods: int | None = None,
+) -> pd.DataFrame:
+    s = pd.to_numeric(df[col], errors="coerce").astype(float)
+    mp = window if min_periods is None else min_periods
+    mu = s.rolling(window, min_periods=mp).mean()
+    sd = s.rolling(window, min_periods=mp).std(ddof=1)
+    df[out] = (s - mu) / sd
+    return df
+
+
+def trend_slope(
+    df: pd.DataFrame,
+    *,
+    col: str = "close",
+    window: int = 60,
+    out: str = "trend_slope_60",
+    use_log: bool = True,
+    min_periods: int | None = None,
+) -> pd.DataFrame:
+    s = pd.to_numeric(df[col], errors="coerce").astype(float)
+    y = np.log(s) if use_log else s
+
+    mp = window if min_periods is None else min_periods
+
+    def slope(arr: np.ndarray) -> float:
+        if np.any(~np.isfinite(arr)):
+            return np.nan
+        x = np.arange(len(arr), dtype=float)
+        # slope of y ~ a + b*x
+        b = np.polyfit(x, arr, 1)[0]
+        return float(b)
+
+    df[out] = y.rolling(window, min_periods=mp).apply(lambda a: slope(a.values), raw=False)
+    return df
+
+
+def parkinson_vol(
+    df: pd.DataFrame,
+    *,
+    high_col: str = "high",
+    low_col: str = "low",
+    out: str = "parkinson_vol",
+) -> pd.DataFrame:
+    hi = pd.to_numeric(df[high_col], errors="coerce").astype(float)
+    lo = pd.to_numeric(df[low_col], errors="coerce").astype(float)
+    # Parkinson variance estimator (daily)
+    var = (1.0 / (4.0 * np.log(2.0))) * (np.log(hi / lo) ** 2)
+    df[out] = np.sqrt(var)
+    return df
+
+
+DAILY_TRANSFORMS = {
+    "returns": returns,
+    "momentum": momentum,
+
+    "rolling_mean": rolling_mean,
+    "rolling_std": rolling_std,
+    "ewma_vol": ewma_vol,
+    "rolling_sharpe": rolling_sharpe,
+
+    "max_drawdown": max_drawdown,
+    "zscore": zscore,
+
+    "trend_slope": trend_slope,
+    "parkinson_vol": parkinson_vol,
+}

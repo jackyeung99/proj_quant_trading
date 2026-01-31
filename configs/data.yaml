@@ -33,8 +33,96 @@ sources:
 
 
 silver: 
-  enabled: True 
+  enabled: False 
 
 
 gold:
-  enabled: False
+  enabled: True
+  
+  tag: 'trade-same-day-3'
+  assets: ['XLE']
+  input_freq: "15Min"        
+  agg_freq: "1D"           # business day buckets
+
+  out_dir: traditional-cutoff 
+
+  # aggregation / market conventions
+  market_tz: "America/New_York"
+  cutoff_hour: 15.0
+
+  intra_features:
+    - name: rv
+      kind: rv
+      requires: ["close"]
+      params: { close_col: "close" }
+
+    - name: rvol
+      kind: rvol
+      requires: ["close"]
+
+    # jump / robust jump-related intraday features
+    - name: bv
+      kind: bv
+      requires: ["close"]
+
+    - name: jump_var
+      kind: jump_var
+      requires: ["close"]
+
+
+  # --- transforms on the daily table after aggregation ---
+  daily_transforms:
+    # returns
+    - name: returns
+      kind: log
+      col: close
+      out: ret_cc
+
+    - name: returns
+      kind: log
+      col: open
+      out: ret_oo
+
+    # rolling volatility on close-close returns
+    - name: rolling_std
+      col: ret_cc
+      windows: [20, 60]
+      prefix: vol_
+      annualize: true
+      periods_per_year: 252.0
+
+    # EWMA vol (nice smooth risk signal)
+    - name: ewma_vol
+      col: ret_cc
+      span: 20
+      out: ewma_vol_20
+      annualize: true
+      periods_per_year: 252.0
+
+    # momentum
+    - name: momentum
+      col: close
+      windows: [5, 20, 60]
+      prefix: mom_
+
+    # trend slope (rolling regression slope on log price)
+    - name: trend_slope
+      col: close
+      window: 60
+      out: trend_slope_60
+      use_log: true
+
+
+    # range-based volatility (requires high/low)
+    - name: parkinson_vol
+      high_col: high
+      low_col: low
+      out: pk_vol
+
+    # rolling sharpe on ret_cc
+    - name: rolling_sharpe
+      ret_col: ret_cc
+      windows: [63]
+      prefix: sharpe_
+      annualize: true
+      periods_per_year: 252.0

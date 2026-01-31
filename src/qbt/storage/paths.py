@@ -50,11 +50,11 @@ class StoragePaths:
         return f"{self.silver}/freq={freq}/ticker={ticker}/bars.parquet"
 
     # ----- gold keys -----
-    def gold_model_key(self, *, universe: str, freq: str = "1D") -> str:
-        return f"{self.gold}/model_table/universe={universe}/freq={freq}/model.parquet"
+    def gold_table_key(self, *, freq: str, tag: str = "default") -> str:
+        return f"{self.gold}/freq={freq}/tag={tag}/table.parquet"
 
-    def gold_manifest_key(self, *, universe: str, freq: str = "1D") -> str:
-        return f"{self.gold}/model_table/universe={universe}/freq={freq}/_manifest.json"
+    def gold_manifest_key(self, *, freq: str, tag: str = "default") -> str:
+        return f"{self.gold}/freq={freq}/tag={tag}/_manifest.json"
 
     # ----- state keys -----
     def source_state_key(self, *, source: str, dataset: str) -> str:
