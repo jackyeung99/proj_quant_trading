@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from qbt.features.forecasts import ewma_vol_forecast_next, garch_vol_forecast_next
 
 def returns(
     df: pd.DataFrame,
@@ -66,25 +67,6 @@ def rolling_std(
         if annualize:
             v = v * np.sqrt(periods_per_year)
         df[f"{prefix}{w}"] = v
-    return df
-
-
-def ewma_vol(
-    df: pd.DataFrame,
-    *,
-    col: str = "ret_1",
-    span: int = 20,
-    out: str = "ewma_vol",
-    annualize: bool = False,
-    periods_per_year: float = 252.0,
-) -> pd.DataFrame:
-    s = pd.to_numeric(df[col], errors="coerce").astype(float)
-    # EWMA variance then sqrt
-    var = s.ewm(span=span, adjust=False).var(bias=False)
-    vol = np.sqrt(var)
-    if annualize:
-        vol = vol * np.sqrt(periods_per_year)
-    df[out] = vol
     return df
 
 
@@ -189,7 +171,6 @@ DAILY_TRANSFORMS = {
 
     "rolling_mean": rolling_mean,
     "rolling_std": rolling_std,
-    "ewma_vol": ewma_vol,
     "rolling_sharpe": rolling_sharpe,
 
     "max_drawdown": max_drawdown,
@@ -197,4 +178,7 @@ DAILY_TRANSFORMS = {
 
     "trend_slope": trend_slope,
     "parkinson_vol": parkinson_vol,
+    
+    "ewma_forecast": ewma_vol_forecast_next,
+    "garch_forecast": garch_vol_forecast_next,
 }

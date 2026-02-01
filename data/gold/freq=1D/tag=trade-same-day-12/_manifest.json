@@ -3,7 +3,7 @@
   "assets": [
     "XLE"
   ],
-  "created_at_utc": "2026-01-31T19:25:30.566396+00:00",
+  "created_at_utc": "2026-02-01T19:03:23.916131+00:00",
   "dataset": "gold_long_table",
   "freq": "1D",
   "paths": {
@@ -66,15 +66,19 @@
       },
       {
         "dtype": "float64",
+        "name": "ewma_sigma_ann_next"
+      },
+      {
+        "dtype": "float64",
+        "name": "garch_sigma_ann_next"
+      },
+      {
+        "dtype": "float64",
         "name": "vol_20"
       },
       {
         "dtype": "float64",
         "name": "vol_60"
-      },
-      {
-        "dtype": "float64",
-        "name": "ewma_vol_20"
       },
       {
         "dtype": "float64",
@@ -113,9 +117,10 @@
       "jump_var",
       "ret_cc",
       "ret_oo",
+      "ewma_sigma_ann_next",
+      "garch_sigma_ann_next",
       "vol_20",
       "vol_60",
-      "ewma_vol_20",
       "mom_5",
       "mom_20",
       "mom_60",
@@ -129,7 +134,7 @@
     ]
   },
   "shape": {
-    "cols": 22,
+    "cols": 23,
     "end_utc": "2026-02-02T00:00:00+00:00",
     "n_assets": 1,
     "rows": 1276,
@@ -157,6 +162,21 @@
         },
         {
           "annualize": true,
+          "lam": 0.94,
+          "name": "ewma_forecast",
+          "out_col": "ewma_sigma_ann_next",
+          "ret_col": "ret_cc"
+        },
+        {
+          "annualize": true,
+          "name": "garch_forecast",
+          "out_col": "garch_sigma_ann_next",
+          "p": 1,
+          "q": 1,
+          "ret_col": "ret_cc"
+        },
+        {
+          "annualize": true,
           "col": "ret_cc",
           "name": "rolling_std",
           "periods_per_year": 252.0,
@@ -165,14 +185,6 @@
             20,
             60
           ]
-        },
-        {
-          "annualize": true,
-          "col": "ret_cc",
-          "name": "ewma_vol",
-          "out": "ewma_vol_20",
-          "periods_per_year": 252.0,
-          "span": 20
         },
         {
           "col": "close",
@@ -245,6 +257,6 @@
       "market_tz": "America/New_York"
     }
   },
-  "spec_hash": "6bf9ee4862b62d63",
+  "spec_hash": "50fb825971ecd11d",
   "tag": "trade-same-day-12"
 }

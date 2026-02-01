@@ -39,16 +39,14 @@ silver:
 gold:
   enabled: True
   
-  tag: 'trade-same-day-3'
+  tag: 'trade-next-day'
   assets: ['XLE']
   input_freq: "15Min"        
   agg_freq: "1D"           # business day buckets
 
-  out_dir: traditional-cutoff 
-
   # aggregation / market conventions
   market_tz: "America/New_York"
-  cutoff_hour: 15.0
+  cutoff_hour: 16.0
 
   intra_features:
     - name: rv
@@ -83,6 +81,23 @@ gold:
       col: open
       out: ret_oo
 
+    - name: ewma_forecast
+      ret_col: ret_cc
+      out_col: ewma_sigma_ann_next
+      annualize: true
+      
+      lam: 0.94
+
+    - name: garch_forecast
+      ret_col: ret_cc
+      out_col: garch_sigma_ann_next
+      annualize: true
+
+      p: 1
+      q: 1
+
+
+
     # rolling volatility on close-close returns
     - name: rolling_std
       col: ret_cc
@@ -91,13 +106,6 @@ gold:
       annualize: true
       periods_per_year: 252.0
 
-    # EWMA vol (nice smooth risk signal)
-    - name: ewma_vol
-      col: ret_cc
-      span: 20
-      out: ewma_vol_20
-      annualize: true
-      periods_per_year: 252.0
 
     # momentum
     - name: momentum
