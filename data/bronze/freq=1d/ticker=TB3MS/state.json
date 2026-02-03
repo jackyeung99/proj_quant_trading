@@ -1,0 +1,11 @@
+{
+  "config_fingerprint": "bcbad07636dd11ea4b837eac24d1bc148f9676945df7670c23f80507fa2e0391",
+  "dataset_end": "2026-01-01T00:00:00+00:00",
+  "dataset_start": "2021-01-01T00:00:00+00:00",
+  "last_success_utc": "2026-02-03T20:18:13.198907+00:00",
+  "pull_end": "2026-01-01T00:00:00+00:00",
+  "pull_start": "2021-01-01T00:00:00+00:00",
+  "rows_in_pull_window": 1827,
+  "rows_total": 1827,
+  "store_key": "data/bronze/freq=1d/ticker=TB3MS/state.json"
+}

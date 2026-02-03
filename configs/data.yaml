@@ -3,41 +3,50 @@ storage:
   base_dir: "."
 
 ingestion:
-  enabled: False
+  enabled: True
   mode: append  # full or append
   lookback_days: 1
-  # start_override: "2021-01-01"
-  # end_override: "2026-01-01"
+  start_override: "2021-01-01"
+  end_override: "2026-01-01"
 
 sources:
 
   equities_daily:
-    enabled: true
+    enabled: False
     provider: yfinance
     symbols: ["XLE", "SPY"]
     interval: "1d"
 
   equities_intraday_15m:
-    enabled: true
+    enabled: False
     provider: alpaca
     symbols: ["XLE", "SPY"]
     interval: "15Min"
     feed: "iex"
     adjustment: "all"
 
+  equities_intraday_5m:
+    enabled: False
+    provider: alpaca
+    symbols: ["XLE",]
+    interval: "5Min"
+    feed: "iex"
+    adjustment: "all"
+
   macro_fred:
-    enabled: true
+    enabled: True
     provider: fred
-    symbols: ["VIXCLS", "DGS10", "DGS2"]
+    symbols: [ "TB3MS" , "DTB4WK"]
+        # "VIXCLS", "DGS10", "DGS2"]
     interval: "1d"
 
 
 silver: 
-  enabled: False 
+  enabled: True 
 
 
 gold:
-  enabled: True
+  enabled: False
   
   tag: 'trade-next-day'
   assets: ['XLE']

@@ -1,6 +1,5 @@
 weight_lag: 1
 rebalance: "D"
-train_freq: "D"
 transaction_cost_bps: 0.0
 
 # --- evaluation method (optional WF) ---

@@ -58,12 +58,11 @@ def main():
 
     base_state = load_yaml("configs/strategies/run_state.yaml")
     state_vars = [
-                "XLE_rv", "XLE_rvol", 
+                "XLE_rvol", "XLE_garch_sigma_ann_next", "XLE_ewma_sigma_ann_next"
                 # "XLE_jump_var", "XLE_ewma_vol_20", "XLE_mom_20", "XLE_mom_60", "XLE_trend_slope_60", "XLE_pk_vol"
                   ]
     
     cutoffs = ["data/gold/freq=1D/tag=trade-same-day-12/table.parquet", "data/gold/freq=1D/tag=trade-same-day-3/table.parquet", "data/gold/freq=1D/tag=trade-next-day/table.parquet"]
-    
     times = ["12 PM ET", "3PM ET", "9 AM ET Next Day"]
 
     for cutoff_path, time  in zip(cutoffs, times):

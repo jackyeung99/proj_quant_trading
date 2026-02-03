@@ -19,6 +19,7 @@ class FredMacroSource(DataSource):
 
     def __init__(self, cfg: Mapping[str, Any] | None = None):
         super().__init__(cfg=cfg)
+        self.interval =  str(cfg.get("interval", "1d"))
 
     def fetch(self, ticker: str, start, end) -> pd.DataFrame:
         ticker = str(ticker).strip()
@@ -64,6 +65,15 @@ class FredMacroSource(DataSource):
         out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
         out["name"] = ticker
         out["value"] = pd.to_numeric(out["value"], errors="coerce")
+
+        out = (
+            out
+            .set_index("timestamp")
+            .sort_index()
+            .resample(self.interval)
+            .ffill()
+            .reset_index()
+        )
 
         return out[["timestamp", "name", "value"]]
 
