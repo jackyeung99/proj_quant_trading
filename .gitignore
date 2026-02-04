@@ -8,7 +8,6 @@ results/
 # Notebooks junk
 notebooks/.cache.sqlite
 notebooks/DEBUG.ipynb
-*.ipynb linguist-vendored
 
 # Python cache
 **/__pycache__/
