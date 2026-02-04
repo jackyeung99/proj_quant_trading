@@ -8,6 +8,7 @@ results/
 # Notebooks junk
 notebooks/.cache.sqlite
 notebooks/DEBUG.ipynb
+*.ipynb linguist-vendored
 
 # Python cache
 **/__pycache__/
@@ -16,3 +17,5 @@ notebooks/DEBUG.ipynb
 build/
 dist/
 *.egg-info/
+
+
