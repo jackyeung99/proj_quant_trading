@@ -16,8 +16,7 @@ logging = get_logger(__name__)
 
 
 
-def ingest_one_source(storage: Storage, paths: StoragePaths, cfg: dict, dataset_name: str, source_cfg: dict) -> dict:
-    ingestion_cfg = cfg.get("ingestion", {}) or {}
+def ingest_one_source(storage: Storage, paths: StoragePaths, ingestion_cfg: dict, source_cfg: dict, dataset_name: str) -> dict:
 
     mode = ingestion_cfg.get('mode')
     lookback = ingestion_cfg.get('lookback_days')
@@ -113,11 +112,10 @@ def ingest_one_source(storage: Storage, paths: StoragePaths, cfg: dict, dataset_
     }
 
 
-def ingest_all_sources(storage: Storage, paths:StoragePaths, cfg: dict) -> dict:
+def ingest_all_sources(storage: Storage, paths:StoragePaths, ingestion_cfg: dict,  sources_cfg: dict) -> dict:
     logging.debug("Using Storage %s base_dir=%s", storage, getattr(storage, "base_dir", None))
     logging.debug("Available Sources: %s", available_sources())
 
-    sources_cfg = cfg.get("sources", {}) or {}
     results: Dict[str, Any] = {}
 
     for dataset_name, source_cfg in sources_cfg.items():
@@ -127,9 +125,9 @@ def ingest_all_sources(storage: Storage, paths:StoragePaths, cfg: dict) -> dict:
         results[str(dataset_name)] = ingest_one_source(
             storage=storage,
             paths=paths,
-            cfg=cfg,
-            dataset_name=str(dataset_name),
+            ingestion_cfg=ingestion_cfg,
             source_cfg=source_cfg,
+            dataset_name=str(dataset_name),
         )
 
     return {"ingestion_results": results}

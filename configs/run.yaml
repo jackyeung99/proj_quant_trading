@@ -1,0 +1,26 @@
+storage:
+  enabled: true
+  config: "steps/storage.yaml"
+
+ingestion:
+  enabled: true
+  config: "steps/ingestion.yaml"
+
+sources:
+  enabled: true
+  config: "steps/sources.yaml"
+
+silver:
+  enabled: true
+
+gold:
+  enabled: false
+  config: "steps/build_model_table.yaml"
+
+signal:
+  enabled: false
+  config: "strategies/run_state.yaml"
+
+execution:
+  enabled: false
+  config: "steps/execution.yaml"

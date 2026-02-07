@@ -15,15 +15,9 @@ from qbt.data.canonical import canonicalize_bars, canonicalize_macro
 logging = get_logger(__name__)
 
 
-def canonicalize_all(storage: Storage, paths: StoragePaths, cfg: dict) -> dict:
+def canonicalize_all(storage: Storage, paths: StoragePaths, sources_cfg: dict) -> dict:
     logging.info("Starting canonicalize_all")
 
-    sources_cfg = cfg.get("sources", {}) or {}
-    silver_cfg = cfg.get("silver", {}) or {}
-
-    if not silver_cfg.get("enabled", True):
-        logging.info("Silver layer disabled; skipping canonicalization")
-        return {"canonicalize_results": {}, "skipped": True}
 
     results: Dict[str, Any] = {}
 

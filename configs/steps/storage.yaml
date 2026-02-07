@@ -1,3 +1,2 @@
-storage:
-  backend: local
-  base_dir: "."
+backend: local
+base_dir: "."

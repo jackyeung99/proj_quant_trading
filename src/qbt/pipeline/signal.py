@@ -38,7 +38,7 @@ def should_retrain(now: pd.Timestamp, meta: dict | None, params: dict) -> bool:
 
     raise ValueError(f"Unknown retrain_freq={freq}")
 
-def decision(storage: Storage, paths: StoragePaths, cfg: dict, now: pd.Timestamp):
+def signal(storage: Storage, paths: StoragePaths, cfg: dict, now: pd.Timestamp):
     strat_cfg = load_yaml(cfg["decision"]["model"])
     spec = RunSpec(**strat_cfg)
 
