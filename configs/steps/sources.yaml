@@ -1,0 +1,30 @@
+sources:
+
+  equities_daily:
+    enabled: False
+    provider: yfinance
+    symbols: ["XLE", "SPY"]
+    interval: "1d"
+
+  equities_intraday_15m:
+    enabled: False
+    provider: alpaca
+    symbols: ["XLE", "SPY"]
+    interval: "15Min"
+    feed: "iex"
+    adjustment: "all"
+
+  equities_intraday_5m:
+    enabled: False
+    provider: alpaca
+    symbols: ["XLE",]
+    interval: "5Min"
+    feed: "iex"
+    adjustment: "all"
+
+  macro_fred:
+    enabled: True
+    provider: fred
+    symbols: [ "TB3MS" , "DTB4WK"]
+        # "VIXCLS", "DGS10", "DGS2"]
+    interval: "1d"
