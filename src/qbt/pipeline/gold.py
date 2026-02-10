@@ -139,5 +139,7 @@ def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict
           .reset_index(drop=True)
     )
 
+    print(gold)
+
     # write_gold_long_with_manifest(storage, paths, gold, gold_cfg=gold_cfg)
     return gold

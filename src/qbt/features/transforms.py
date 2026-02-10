@@ -8,17 +8,58 @@ from qbt.features.forecasts import ewma_vol_forecast_next, garch_vol_forecast_ne
 def returns(
     df: pd.DataFrame,
     *,
-    col: str = "close",
-    kind: str = "log",
-    out: str = "ret_1",
+    mode: str = "c2c",          # "c2c", "o2o", "o2c", "c2o"
+    kind: str = "log",          # "log" or "simple"
+    open_col: str = "open",
+    close_col: str = "close",
+    out: str | None = None,
 ) -> pd.DataFrame:
-    s = pd.to_numeric(df[col], errors="coerce").astype(float)
-    if kind == "log":
-        df[out] = np.log(s).diff()
-    elif kind == "simple":
-        df[out] = s.pct_change()
-    else:
+    """
+    Compute returns with explicit timing semantics.
+
+    Modes:
+      - "c2c": close_t / close_{t-1}
+      - "o2c": close_t / open_t     (intraday)
+      - "c2o": open_t / close_{t-1}  (overnight)
+      - "o2o": open_t/ open_{t-1}
+
+    Adds a column to df and returns df.
+    """
+    if kind not in {"log", "simple"}:
         raise ValueError(f"returns.kind must be 'log' or 'simple', got {kind}")
+
+    if mode == "c2c":
+        num = pd.to_numeric(df[close_col], errors="coerce").astype(float)
+        den = num.shift(1)
+
+        out = out or "ret_cc"
+
+    elif mode == "o2c":
+        num = pd.to_numeric(df[close_col], errors="coerce").astype(float)
+        den = pd.to_numeric(df[open_col], errors="coerce").astype(float)
+
+        out = out or "ret_oc"
+
+    elif mode == "c2o":
+        num = pd.to_numeric(df[open_col], errors="coerce").astype(float)
+        den = pd.to_numeric(df[close_col], errors="coerce").astype(float).shift(1)
+
+        out = out or "ret_co"
+
+    elif mode == "o2o":
+        num = pd.to_numeric(df[open_col], errors="coerce").astype(float)
+        den = num.shift(1)
+
+        out = out or "ret_oo"
+
+    else:
+        raise ValueError(f"returns.mode must be one of 'c2c', 'o2c', 'c2o', got {mode}")
+
+    if kind == "log":
+        df[out] = np.log(num / den)
+    else:
+        df[out] = (num / den) - 1.0
+
     return df
 
 

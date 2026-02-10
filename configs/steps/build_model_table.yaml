@@ -24,12 +24,18 @@ daily_transforms:
   # returns
   - name: returns
     kind: log
-    col: close
-    out: ret_cc
+    mode: c2c
 
   - name: returns
     kind: log
-    col: open
-    out: ret_oo
+    mode: o2o
+
+  - name: returns
+    kind: log
+    mode: c2o
+
+  - name: returns
+    kind: log
+    mode: o2c
 
   
