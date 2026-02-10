@@ -7,33 +7,56 @@ import numpy as np
 import pandas as pd
 
 import pandas as pd
-import exchange_calendars as xcals
 
 from qbt.features.apply import apply_intra_features
-
-def roll_to_next_session_nyse(dates: pd.DatetimeIndex) -> pd.DatetimeIndex:
-    """
-    dates: timezone-aware or naive daily timestamps (we only use the date part)
-    returns: dates rolled forward to the next NYSE session if needed
-    """
-    cal = xcals.get_calendar("XNYS")
-
-    # Convert to naive dates for session lookup
-    d = pd.DatetimeIndex(pd.to_datetime(dates).date)
-
-    # cal.sessions is a DatetimeIndex of valid session opens (midnight UTC-ish is fine)
-    sessions = cal.sessions  # all sessions in calendar range
-
-    # For each date, find the first session >= that date
-    # Using searchsorted on sessions (convert to naive date timestamps)
-    sess = pd.DatetimeIndex(pd.to_datetime(sessions.date))
-    pos = sess.searchsorted(d, side="left")
-    pos = pos.clip(0, len(sess) - 1)
-
-    return sess[pos]
+from qbt.utils.dates import roll_to_next_session_nyse, _parse_cutoff
 
 
-def _bucket_daily_with_cutoff(
+def resample_ohlcv(
+    df: pd.DataFrame,
+    *,
+    rv_freq: str = "10min",
+    tz: str | None = "America/New_York",
+    session_start: str = "09:30",
+    session_end: str = "16:00",
+    open_col: str = "open",
+    high_col: str = "high",
+    low_col: str = "low",
+    close_col: str = "close",
+    volume_col: str = "volume",
+) -> pd.DataFrame:
+    x = df.copy()
+    if not isinstance(x.index, pd.DatetimeIndex):
+        raise ValueError("df must be indexed by a DatetimeIndex.")
+    x = x.sort_index()
+
+    tz = tz or "America/New_York"  
+
+    if x.index.tz is None:
+        x.index = x.index.tz_localize("UTC").tz_convert(tz)
+    else:
+        x.index = x.index.tz_convert(tz)
+
+    if session_start and session_end:
+        x = x.between_time(session_start, session_end, inclusive="both")
+
+    needed = [open_col, high_col, low_col, close_col]
+    missing = [c for c in needed if c not in x.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    agg_map = {open_col: "first", high_col: "max", low_col: "min", close_col: "last"}
+    if volume_col in x.columns:
+        agg_map[volume_col] = "sum"
+
+    out = x.resample(rv_freq).agg(agg_map)
+    out = out.dropna(subset=[open_col, high_col, low_col, close_col], how="all")
+    return out
+
+
+
+
+def bucket_daily_with_cutoff_with_roll(
     idx: pd.DatetimeIndex,
     *,
     cutoff_hour: float,
@@ -49,21 +72,43 @@ def _bucket_daily_with_cutoff(
     return day
 
 
+def bucket_daily_with_cutoff_no_roll(
+    idx: pd.DatetimeIndex,
+    *,
+    cutoff_hour: float,
+) -> tuple[pd.DatetimeIndex, pd.Series]:
+    """
+    Return (labels, mask) where:
+      - labels: calendar-day label for each timestamp (idx.normalize())
+      - mask: boolean Series indicating rows to KEEP (time-of-day <= cutoff)
+    """
+    if not isinstance(idx, pd.DatetimeIndex):
+        raise TypeError("idx must be a DatetimeIndex")
 
-def _parse_cutoff(cutoff_hour: float) -> pd.Timedelta:
-    h = int(cutoff_hour)
-    m = int(round((cutoff_hour - h) * 60))
-    return pd.Timedelta(hours=h, minutes=m)
+    cutoff = _parse_cutoff(cutoff_hour)
+
+    # time since midnight (TimedeltaIndex)
+    tod = idx - idx.normalize()
+
+    # keep rows at or before cutoff
+    mask = tod <= cutoff
+
+    labels = idx.normalize()
+    # keep index/labels aligned and preserve tz if present
+    if idx.tz is not None and labels.tz is None:
+        labels = labels.tz_localize(idx.tz)
+
+    return labels, pd.Series(mask, index=idx)
 
 
 
 def aggregate_intraday_to_daily_features(
     df: pd.DataFrame,
     *,
+    intra_freq = '5 Min',
     cutoff_hour: float = 16.0,
     tz: str | None = "America/New_York",
     features: Iterable[Mapping[str, Any]],
-    keep_ohlc: bool = True,
     open_field: str = "open",
     close_field: str = "close",
 ) -> pd.DataFrame:
@@ -74,63 +119,58 @@ def aggregate_intraday_to_daily_features(
     if not isinstance(df.index, pd.DatetimeIndex):
         raise TypeError("df.index must be a DatetimeIndex")
 
-    x = df.sort_index().copy()
+    df = df.sort_index().copy()
 
-    if tz is not None:
-        if x.index.tz is None:
-            x.index = x.index.tz_localize(tz)
-        else:
-            x.index = x.index.tz_convert(tz)
+    # resample to intraday freq    
+    intra = resample_ohlcv(df, rv_freq=intra_freq, tz=tz)
 
-    bucket = _bucket_daily_with_cutoff(x.index, cutoff_hour=cutoff_hour)
 
-    # --- build features: each spec becomes one column ---
-    feat_series: list[pd.Series] = []
-    cols = set(x.columns)
 
-    for feat in features:
-        name = str(feat.get("name"))
-        requires = tuple(feat.get("requires", ()))  # type: ignore
-        func = feat.get("func")
+    # ======================             
 
-        if not name or func is None:
-            continue
+    '''
+    TO DO: handle different ways to group intraday rows 
 
-        # If required cols missing, return NaN for all buckets
-        if any(c not in cols for c in requires):
-            s = pd.Series(index=pd.Index(bucket.unique()).sort_values(), dtype="float64", name=name)
-            s.loc[:] = np.nan
-            feat_series.append(s)
-            continue
+    ex.
+    
+    1. take days before cutoff for day t and rows after the cutoff go to day t+1 
+    2. support different intraday freq use daily for intra computation if the end frequency is weekly 
 
-        # Reduce intraday -> scalar per bucket
-        def _safe_reduce(g: pd.DataFrame) -> float:
-            try:
-                return float(func(g))
-            except Exception:
-                return np.nan
+    '''
+    # handle cutoff 
+    labels, mask = bucket_daily_with_cutoff_no_roll(intra.index, cutoff_hour=cutoff_hour)
 
-        s = x.groupby(bucket, sort=True).apply(_safe_reduce)
-        s.name = name
-        feat_series.append(s)
+    # apply mask to intra and labels
+    intra_cut = intra.loc[mask.values]
+    if intra_cut.empty:
+        # no data after masking — return empty DataFrame with expected index type
+        empty_index = pd.Index([], dtype="datetime64[ns]")
+        return pd.DataFrame(index=empty_index)
 
-    feats_df = pd.concat(feat_series, axis=1) if feat_series else pd.DataFrame(index=pd.Index(bucket.unique()).sort_values())
+    labels_cut = labels[mask.values]
 
-    # --- add OHLC if requested ---
-    if keep_ohlc:
-        if open_field not in x.columns or close_field not in x.columns:
-            raise ValueError(f"Missing {open_field}/{close_field} for keep_ohlc=True")
-        ohlc = x.groupby(bucket, sort=True).agg(
-                        {
-                            open_field: "first",
-                            "high": "max",
-                            "low": "min",
-                            close_field: "last",
-                            "volume": "sum",
-                        }
-                    )
-        out = ohlc.join(feats_df, how="outer")
-    else:
-        out = feats_df
+
+
+    # ======================
+    # build features
+    feats_df = apply_intra_features(intra_cut, labels_cut, features)
+
+    # --- add OHLC ---
+    agg_map = {
+        open_field: "first",
+        "high": "max",
+        "low": "min",
+        close_field: "last",
+    }
+    if "volume" in intra_cut.columns:
+        agg_map["volume"] = "sum"
+
+    ohlc = intra_cut.groupby(labels_cut, sort=True).agg(agg_map)
+    out = ohlc.join(feats_df, how="outer")
+    
 
     return out.sort_index()
+
+
+
+

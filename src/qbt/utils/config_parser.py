@@ -12,39 +12,28 @@ def deep_merge(a: dict, b: dict) -> dict:
     return out
 
 def load_controlled_cfg(entry_path: str = "config/data.yaml") -> dict:
-    """
-    Assumptions:
-      - you run from repo root
-      - entry file is in root/config/data.yaml
-      - each section in data.yaml has:
-            enabled: bool
-            config: "storage.yaml"  (relative to the config/ folder) OR an absolute path
-      - inline overrides in data.yaml are merged on top of the loaded file
-    print(entry_path)
-    """
     entry = Path(entry_path).resolve()
     root = yaml.safe_load(entry.read_text()) or {}
-
 
     cfg: dict = {}
     config_dir = entry.parent  # root/config
 
-
     for section, control in root.items():
-        
 
         if not isinstance(control, dict):
             cfg[section] = control
             continue
 
-        enabled = bool(control.get("enabled", False))
         config_path = control.get("config")
+
+        # Only read enabled if user explicitly provided it
+        has_enabled = "enabled" in control
+        enabled = bool(control["enabled"]) if has_enabled else None
 
         loaded: dict = {}
         if config_path:
             p = Path(config_path)
             if not p.is_absolute():
-                # resolve relative to config/ directory
                 p = (config_dir / p).resolve()
 
             if not p.exists():
@@ -52,12 +41,17 @@ def load_controlled_cfg(entry_path: str = "config/data.yaml") -> dict:
 
             loaded = yaml.safe_load(p.read_text()) or {}
 
-        # merge: file contents + inline overrides (except "config")
-        overrides = {k: v for k, v in control.items() if k != "config"}
+        # merge: file contents + inline overrides (except "config" and "enabled")
+        overrides = {
+            k: v for k, v in control.items()
+            if k not in ("config", "enabled")
+        }
         merged = deep_merge(loaded, overrides)
-        merged["enabled"] = enabled
+
+        # Only attach enabled if it existed in data.yaml
+        if has_enabled:
+            merged["enabled"] = enabled
+
         cfg[section] = merged
 
     return cfg
-
-

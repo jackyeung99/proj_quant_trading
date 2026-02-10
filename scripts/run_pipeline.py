@@ -24,6 +24,8 @@ def main():
     storage = LocalStorage(base_dir=Path(storage_cfg.get("base_dir", ".")))
     paths = StoragePaths()
 
+
+
     run_pipeline(storage=storage, paths=paths, cfg=cfg)
 
 

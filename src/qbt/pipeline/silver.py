@@ -21,7 +21,9 @@ def canonicalize_all(storage: Storage, paths: StoragePaths, sources_cfg: dict) -
 
     results: Dict[str, Any] = {}
 
+
     for source_name, sc in sources_cfg.items():
+
         if not sc.get("enabled", False):
             logging.debug("Source disabled, skipping: %s", source_name)
             continue

@@ -22,6 +22,7 @@ def apply_transforms(df: pd.DataFrame, transforms_cfg: list[dict], registry: dic
 
 def apply_intra_features(
     bars: pd.DataFrame,
+    bucket: pd.Series,
     features: Iterable[Mapping[str, Any]],
 ) -> pd.Series:
     """
@@ -32,7 +33,7 @@ def apply_intra_features(
       - func: Callable[[pd.DataFrame], float]
     Returns Series indexed by feature name.
     """
-    out: dict[str, float] = {}
+    feat_series: list[pd.Series] = []
     cols = set(bars.columns)
 
     for feat in features:
@@ -41,19 +42,26 @@ def apply_intra_features(
         func = feat.get("func")
 
         if not name or func is None:
-            # bad spec -> NaN (or raise if you prefer)
-            if name:
-                out[name] = np.nan
             continue
 
-        missing = [c for c in requires if c not in cols]
-        if missing:
-            out[name] = np.nan
+        # If required cols missing, return NaN for all buckets
+        if any(c not in cols for c in requires):
+            s = pd.Series(index=pd.Index(bucket.unique()).sort_values(), dtype="float64", name=name)
+            s.loc[:] = np.nan
+            feat_series.append(s)
             continue
 
-        try:
-            out[name] = float(func(bars))
-        except Exception:
-            out[name] = np.nan
+        # Reduce intraday -> scalar per bucket
+        def _safe_reduce(g: pd.DataFrame) -> float:
+            try:
+                return float(func(g))
+            except Exception:
+                return np.nan
 
-    return pd.Series(out)
+        s = bars.groupby(bucket, sort=True).apply(_safe_reduce)
+        s.name = name
+        feat_series.append(s)
+
+    feats_df = pd.concat(feat_series, axis=1) if feat_series else pd.DataFrame(index=pd.Index(bucket.unique()).sort_values())
+
+    return feats_df

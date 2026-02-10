@@ -1,7 +1,8 @@
-tag: 'trade-next-day'
+tag: 'c2c'
 assets: ['XLE']
-input_freq: "15Min"        
-agg_freq: "1D"           # business day buckets
+input_freq: "5Min"        
+intraday_freq: "5min"
+
 
 # aggregation / market conventions
 market_tz: "America/New_York"
@@ -15,15 +16,6 @@ intra_features:
 
   - name: rvol
     kind: rvol
-    requires: ["close"]
-
-  # jump / robust jump-related intraday features
-  - name: bv
-    kind: bv
-    requires: ["close"]
-
-  - name: jump_var
-    kind: jump_var
     requires: ["close"]
 
 
@@ -40,56 +32,4 @@ daily_transforms:
     col: open
     out: ret_oo
 
-  - name: ewma_forecast
-    ret_col: ret_cc
-    out_col: ewma_sigma_ann_next
-    annualize: true
-    
-    lam: 0.94
-
-  - name: garch_forecast
-    ret_col: ret_cc
-    out_col: garch_sigma_ann_next
-    annualize: true
-
-    p: 1
-    q: 1
-
-
-
-  # rolling volatility on close-close returns
-  - name: rolling_std
-    col: ret_cc
-    windows: [20, 60]
-    prefix: vol_
-    annualize: true
-    periods_per_year: 252.0
-
-
-  # momentum
-  - name: momentum
-    col: close
-    windows: [5, 20, 60]
-    prefix: mom_
-
-  # trend slope (rolling regression slope on log price)
-  - name: trend_slope
-    col: close
-    window: 60
-    out: trend_slope_60
-    use_log: true
-
-
-  # range-based volatility (requires high/low)
-  - name: parkinson_vol
-    high_col: high
-    low_col: low
-    out: pk_vol
-
-  # rolling sharpe on ret_cc
-  - name: rolling_sharpe
-    ret_col: ret_cc
-    windows: [63]
-    prefix: sharpe_
-    annualize: true
-    periods_per_year: 252.0
+  

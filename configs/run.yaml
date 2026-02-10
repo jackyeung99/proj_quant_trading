@@ -1,20 +1,19 @@
 storage:
-  enabled: true
   config: "steps/storage.yaml"
 
-ingestion:
-  enabled: true
-  config: "steps/ingestion.yaml"
-
 sources:
-  enabled: true
   config: "steps/sources.yaml"
 
+
+ingestion:
+  enabled: false
+  config: "steps/ingestion.yaml"
+
 silver:
-  enabled: true
+  enabled: false
 
 gold:
-  enabled: false
+  enabled: true
   config: "steps/build_model_table.yaml"
 
 signal:

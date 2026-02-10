@@ -1,11 +1,11 @@
 {
-  "config_fingerprint": "89f76c4190f2a0c65df09182da6aae73003eace2e3c36147e31e9d4901862db0",
-  "dataset_end": "2025-12-31T20:55:00+00:00",
+  "config_fingerprint": "3827bf0e800dcb36e0854ac15c539e9c8f5a9f577946ff0955a0be2a182eb37b",
+  "dataset_end": "2026-02-10T17:40:00+00:00",
   "dataset_start": "2021-01-04T13:45:00+00:00",
-  "last_success_utc": "2026-02-03T17:45:11.975678+00:00",
-  "pull_end": "2026-01-01T00:00:00+00:00",
-  "pull_start": "2021-01-01T00:00:00+00:00",
-  "rows_in_pull_window": 97559,
-  "rows_total": 97559,
+  "last_success_utc": "2026-02-10T17:45:55.081168+00:00",
+  "pull_end": "2026-02-10T17:45:53.998189+00:00",
+  "pull_start": "2025-12-30T20:55:00+00:00",
+  "rows_in_pull_window": 2175,
+  "rows_total": 99655,
   "store_key": "data/bronze/freq=5Min/ticker=XLE/state.json"
 }

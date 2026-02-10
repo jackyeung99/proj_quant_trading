@@ -14,7 +14,7 @@ equities_intraday_15m:
   adjustment: "all"
 
 equities_intraday_5m:
-  enabled: False
+  enabled: True
   provider: alpaca
   symbols: ["XLE",]
   interval: "5Min"
@@ -22,7 +22,7 @@ equities_intraday_5m:
   adjustment: "all"
 
 macro_fred:
-  enabled: True
+  enabled: False
   provider: fred
   symbols: [ "TB3MS" , "DTB4WK"]
       # "VIXCLS", "DGS10", "DGS2"]

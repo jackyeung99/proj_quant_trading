@@ -22,7 +22,7 @@ def run_pipeline(storage, paths, cfg):
 
     if cfg["silver"]["enabled"]:
         canonicalize_all(storage, paths,
-                         silver_cfg=cfg["silver"],
+                        #  silver_cfg=cfg["silver"],
                          sources_cfg=cfg["sources"])
 
     if cfg["gold"]["enabled"]:
