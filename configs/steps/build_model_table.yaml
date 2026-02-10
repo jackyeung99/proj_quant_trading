@@ -1,7 +1,8 @@
-tag: 'c2c'
+tag: 'model_ready'
 assets: ['XLE']
 input_freq: "5Min"        
 intraday_freq: "5min"
+agg_freq: "1D"
 
 
 # aggregation / market conventions

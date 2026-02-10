@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 import json
+import pickle
 import uuid
 
 from qbt.core.logging import get_logger
@@ -36,6 +37,16 @@ class Storage:
     def write_json(self, obj: Any, key: str) -> None:
         logger.info(f"Writing json to {key}")
         raise NotImplementedError
+    
+
+    def read_pickle(self, key):
+        logger.info(f"reading file:{key}")
+        raise NotImplementedError
+    
+    def write_pickle(self, obj: Any, key: str):
+        logger.info(f"Writing Pickle to {key}")
+        raise NotImplementedError
+
 
 
 @dataclass(frozen=True)
@@ -48,6 +59,9 @@ class LocalStorage(Storage):
     def exists(self, key: str) -> bool:
         return self._path(key).exists()
 
+    # =====================
+    # Parquet
+    # =====================
     def read_parquet(self, key: str) -> pd.DataFrame:
         return pd.read_parquet(self._path(key))
 
@@ -58,6 +72,9 @@ class LocalStorage(Storage):
         df.to_parquet(tmp, index=True)
         tmp.replace(path)
 
+    # =====================
+    # JSON
+    # =====================
     def read_json(self, key: str) -> Any:
         path = self._path(key)
         with path.open("r", encoding="utf-8") as f:
@@ -69,6 +86,22 @@ class LocalStorage(Storage):
         tmp = path.with_suffix(path.suffix + ".tmp")
         with tmp.open("w", encoding="utf-8") as f:
             json.dump(obj, f, indent=2, sort_keys=True, default=str)
+        tmp.replace(path)
+
+    # =====================
+    # Pickle
+    # =====================
+    def read_pickle(self, key: str) -> Any:
+        path = self._path(key)
+        with path.open("rb") as f:
+            return pickle.load(f)
+
+    def write_pickle(self, obj: Any, key: str) -> None:
+        path = self._path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with tmp.open("wb") as f:
+            pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
         tmp.replace(path)
 
 

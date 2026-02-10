@@ -1,6 +1,23 @@
 import yaml
 from pathlib import Path
 from copy import deepcopy
+import json
+import hashlib
+from typing import Any, Dict
+
+
+def config_hash(cfg: Dict[str, Any], *, length: int = 16) -> str:
+    """
+    Stable hash for a config dict.
+    - order-independent
+    - JSON-serializable
+    - suitable for retrain invalidation
+    """
+    payload = json.dumps(cfg, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:length]
+
+def load_yaml(path: str) -> dict:
+    return yaml.safe_load(Path(path).read_text())
 
 def deep_merge(a: dict, b: dict) -> dict:
     out = deepcopy(a)
@@ -42,16 +59,15 @@ def load_controlled_cfg(entry_path: str = "config/data.yaml") -> dict:
             loaded = yaml.safe_load(p.read_text()) or {}
 
         # merge: file contents + inline overrides (except "config" and "enabled")
-        overrides = {
-            k: v for k, v in control.items()
-            if k not in ("config", "enabled")
-        }
-        merged = deep_merge(loaded, overrides)
+        inline_overrides = {k: v for k, v in control.items() if k not in ("enabled", "config")}
 
-        # Only attach enabled if it existed in data.yaml
-        if has_enabled:
-            merged["enabled"] = enabled
+        merged = deep_merge(loaded, inline_overrides)
 
-        cfg[section] = merged
+        # For pipeline steps, keep enabled separate from the cfg payload
+        if section in {"ingestion", "silver", "gold", "signal", "execution"}:
+            cfg[section] = {"enabled": enabled, "cfg": merged}
+        else:
+            # non-step sections like storage/sources are always "enabled"
+            cfg[section] = merged
 
     return cfg

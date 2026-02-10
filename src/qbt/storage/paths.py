@@ -33,8 +33,11 @@ class StoragePaths:
     silver: str = "data/silver"
     gold: str = "data/gold"
     state: str = "data/_state"
+    models_dir: str ="data/models" 
+    execution_dir: str = "data/execution"
 
 
+    # data construction pipeline
     # ----- bronze keys -----
     def bronze_bars_key(self, *, freq: str, ticker: str) -> str:
         return f"{self.bronze}/freq={freq}/ticker={ticker}/bars.parquet"
@@ -61,6 +64,7 @@ class StoragePaths:
         return f"{self.state}/{source}/{dataset}.json"
     
 
+    # Back testing
     # ---- global artifacts ----
     def runs_key(self) -> str:
         return str(PurePosixPath(self.results) / "runs.parquet")
@@ -85,3 +89,16 @@ class StoragePaths:
             / f"run_id={_clean(run_id)}"
         )
         return str(p / "timeseries.parquet")
+    
+
+    # live 
+
+    def model_key(self, strat_name):
+        return f"{self.models_dir}/{strat_name}/model.pkl"
+
+
+    def model_meta_key(self, strat_name):
+        return f"{self.models_dir}/{strat_name}/meta.json"
+
+    def latest_weight_key(self, strategy: str) -> str:
+        return f"{self.execution_dir}/strategy={strategy}/weights.parquet"

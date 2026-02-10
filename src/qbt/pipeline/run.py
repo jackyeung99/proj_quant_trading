@@ -12,29 +12,44 @@ from qbt.pipeline.gold import build_gold_model_table
 from qbt.pipeline.execute import execute_weights
 from qbt.pipeline.signal import signal
 
-
+import pprint
 
 def run_pipeline(storage, paths, cfg):
+
+
     if cfg["ingestion"]["enabled"]:
-        ingest_all_sources(storage, paths,
-                           ingestion_cfg=cfg["ingestion"],
-                           sources_cfg=cfg["sources"])
+        ingest_all_sources(
+            storage,
+            paths,
+            ingestion_cfg=cfg["ingestion"]['cfg'],
+            sources_cfg=cfg["sources"],
+        )
 
     if cfg["silver"]["enabled"]:
-        canonicalize_all(storage, paths,
-                        #  silver_cfg=cfg["silver"],
-                         sources_cfg=cfg["sources"])
+        canonicalize_all(
+            storage,
+            paths,
+            sources_cfg=cfg["sources"]['cfg'],
+        )
 
     if cfg["gold"]["enabled"]:
-        build_gold_model_table(storage, paths,
-                               gold_cfg=cfg["gold"])
-        
-    if cfg["signal"]["enabled"]:
-        signal(storage, paths,
-                signal_cfg=cfg["signal"])
-        
-    if cfg["execution"]["enabled"]:
-        execute_weights(storage, paths,
-                        execution_cfg=cfg["execution"])
+        build_gold_model_table(
+            storage,
+            paths,
+            gold_cfg=cfg["gold"]['cfg'],
+        )
 
+    if cfg["signal"]["enabled"]:
+        signal(
+            storage,
+            paths,
+            strat_cfg=cfg["signal"]['cfg'],
+        )
+
+    if cfg["execution"]["enabled"]:
+        execute_weights(
+            storage,
+            paths,
+            execution_cfg=cfg["execution"]['cfg'],
+        )
 

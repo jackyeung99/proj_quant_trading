@@ -16,6 +16,27 @@ from qbt.data.loaders import load_multi_asset_flat_long
 
 
 
+def normalize_gold_cfg(gold_cfg: dict) -> dict:
+    cfg = dict(gold_cfg or {})
+
+    # defaults + type casting (do it once)
+    cfg["input_freq"] = cfg.get("input_freq", "15Min")
+    cfg["market_tz"] = cfg.get("market_tz", "America/New_York")
+
+    cutoff = cfg.get("cutoff_hour", 16.0)
+    cfg["cutoff_hour"] = float(cutoff)
+
+    cfg["daily_transforms"] = cfg.get("daily_transforms", []) or []
+    cfg["assets"] = cfg.get("assets", []) or []
+    cfg["intra_features"] = cfg.get("intra_features", []) or []
+
+    # light validation (optional but helpful)
+    if not isinstance(cfg["assets"], list):
+        raise ValueError("gold_cfg.assets must be a list")
+    if cfg["cutoff_hour"] <= 0 or cfg["cutoff_hour"] >= 24:
+        raise ValueError("gold_cfg.cutoff_hour must be in (0, 24)")
+
+    return cfg
 
 
 
@@ -88,15 +109,16 @@ def _per_ticker_daily(
 
 
 def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict) -> pd.DataFrame:
-    input_freq = gold_cfg.get("input_freq", "15Min")
-    market_tz = gold_cfg.get("market_tz", "America/New_York")
-    cutoff_hour = float(gold_cfg.get("cutoff_hour", 16.0))
+    cfg = normalize_gold_cfg(gold_cfg)
 
-    daily_cfg = gold_cfg.get("daily_transforms", []) or []
-    assets = gold_cfg.get("assets", []) or []
+    input_freq = cfg["input_freq"]
+    market_tz = cfg["market_tz"]
+    cutoff_hour = cfg["cutoff_hour"]
 
-    # Build once
-    feature_specs = build_intra_feature_specs(gold_cfg)
+    daily_cfg = cfg["daily_transforms"]
+    assets = cfg["assets"]
+
+    feature_specs = build_intra_feature_specs(cfg)
 
     # 1) load intraday long
     df = load_multi_asset_flat_long(
@@ -141,5 +163,5 @@ def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict
 
     print(gold)
 
-    # write_gold_long_with_manifest(storage, paths, gold, gold_cfg=gold_cfg)
+    write_gold_long_with_manifest(storage, paths, gold, gold_cfg=gold_cfg)
     return gold

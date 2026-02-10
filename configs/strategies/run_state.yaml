@@ -1,14 +1,20 @@
+run: 
+  strategy_name: StateSignal
+  universe: XLE
+  tag: rv_regime_5m
 
-strategy_name: StateSignal
-universe: XLE
-tag: rv_regime_15m
+  assets:
+    - XLE
 
-assets:
-  - XLE
+  data_path: 'data/gold/freq=1D/tag=model_ready/table.parquet'
 
-data_path: 'data/gold/freq=1D/tag=trade-next-day/table.parquet'
+  params:
+    state_var: XLE_rvol
+    w_low: 0
+    w_high: 1.0
 
-params:
-  state_var: XLE_rvol
-  w_low: 0
-  w_high: 1.0
+
+live:
+  retrain_freq: "1D"
+  train_lookback_bars: 504
+  min_train_bars: 200
