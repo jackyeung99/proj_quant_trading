@@ -14,7 +14,7 @@ from qbt.pipeline.signal import signal
 
 import pprint
 
-def run_pipeline(storage, paths, cfg):
+def run_pipeline(storage, paths, cfg, artifact_store):
 
 
     if cfg["ingestion"]["enabled"]:
@@ -29,7 +29,7 @@ def run_pipeline(storage, paths, cfg):
         canonicalize_all(
             storage,
             paths,
-            sources_cfg=cfg["sources"]['cfg'],
+            sources_cfg=cfg["sources"],
         )
 
     if cfg["gold"]["enabled"]:
@@ -41,15 +41,15 @@ def run_pipeline(storage, paths, cfg):
 
     if cfg["signal"]["enabled"]:
         signal(
-            storage,
-            paths,
+            storage=artifact_store,
+            # paths=paths,
             strat_cfg=cfg["signal"]['cfg'],
         )
 
     if cfg["execution"]["enabled"]:
         execute_weights(
-            storage,
-            paths,
+            artifact_store,
+            # paths,
             execution_cfg=cfg["execution"]['cfg'],
         )
 

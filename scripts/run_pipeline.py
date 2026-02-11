@@ -4,6 +4,7 @@ from pathlib import Path
 import yaml
 
 from qbt.storage.storage import LocalStorage
+from qbt.storage.artifacts import LiveStore
 from qbt.storage.paths import StoragePaths
 from qbt.pipeline.run import run_pipeline
 from qbt.core.logging import setup_logging
@@ -23,10 +24,11 @@ def main():
     storage_cfg = cfg["storage"]
     storage = LocalStorage(base_dir=Path(storage_cfg.get("base_dir", ".")))
     paths = StoragePaths()
+    artifact_store = LiveStore(storage, paths)
 
 
 
-    run_pipeline(storage=storage, paths=paths, cfg=cfg)
+    run_pipeline(storage=storage, paths=paths, cfg=cfg, artifact_store=artifact_store)
 
 
 if __name__ == "__main__":

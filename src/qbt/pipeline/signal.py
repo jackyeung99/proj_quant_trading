@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import pandas as pd
-
-from qbt.storage.storage import Storage
-from qbt.storage.paths import StoragePaths
 
 from qbt.core.types import RunSpec, ModelInputs, ModelBundle
 from qbt.data.dataloader import DataAdapter, DefaultDataAdapter
@@ -26,14 +22,6 @@ def should_retrain(
     retrain_freq: str,
     config_hash_now: str | None = None,
 ) -> bool:
-    """
-    Idempotent retrain decision.
-
-    Retrain if:
-      - no meta
-      - config hash changed (optional)
-      - retrain_freq says we should
-    """
     if meta is None or "trained_at" not in meta:
         return True
 
@@ -56,7 +44,6 @@ def should_retrain(
         na = now.isocalendar()
         return (ta.year, ta.week) != (na.year, na.week)
 
-    # also allow pandas-style timedeltas: "6H", "30min", etc.
     try:
         return now >= trained_at + pd.Timedelta(freq)
     except Exception as e:
@@ -64,61 +51,7 @@ def should_retrain(
 
 
 # =============================================================================
-# Weights utilities
-# =============================================================================
-
-def normalize_latest_weights(w: pd.Series | pd.DataFrame) -> pd.DataFrame:
-    """Return a single-row DataFrame of latest weights."""
-    if isinstance(w, pd.Series):
-        out = w.to_frame().T
-    else:
-        if w is None or w.empty:
-            raise ValueError("Strategy returned empty weights DataFrame.")
-        out = w.tail(1)
-
-    return out.astype(float).fillna(0.0)
-
-
-def append_idempotent_timeseries(
-    storage: Storage,
-    key: str,
-    row: pd.DataFrame,
-    *,
-    index_name: str = "asof",
-) -> pd.DataFrame:
-    """
-    Append a single-row DF into a parquet timeseries, idempotently:
-    - union columns
-    - drop existing rows with same index
-    - sort by index
-    """
-    if row.shape[0] != 1:
-        raise ValueError("append_idempotent_timeseries expects a single-row DataFrame.")
-
-    row = row.copy()
-    row.index.name = index_name
-    ts = row.index[0]
-
-    if storage.exists(key):
-        prev = storage.read_parquet(key)
-        prev.index.name = index_name
-
-        all_cols = prev.columns.union(row.columns)
-        prev = prev.reindex(columns=all_cols)
-        row = row.reindex(columns=all_cols)
-
-        # idempotent overwrite of the same timestamp
-        prev = prev.loc[prev.index != ts]
-        out = pd.concat([prev, row]).sort_index()
-    else:
-        out = row
-
-    storage.write_parquet(out, key)
-    return out
-
-
-# =============================================================================
-# Training utilities
+# Input utilities
 # =============================================================================
 
 def prepare_inputs(
@@ -152,24 +85,39 @@ def enforce_bundle_schema(bundle: ModelBundle, inputs: ModelInputs) -> ModelInpu
 
 
 # =============================================================================
-# Main step
+# Weights utilities (DF-only)
+# =============================================================================
+
+def latest_row_df(w: pd.DataFrame) -> pd.DataFrame:
+    """
+    Enforce: weights are a time-indexed DataFrame (DatetimeIndex),
+    columns are assets, return 1-row DF.
+    """
+    if w is None or not isinstance(w, pd.DataFrame) or w.empty:
+        raise ValueError("Strategy must return a non-empty DataFrame of weights.")
+    if not isinstance(w.index, pd.DatetimeIndex):
+        raise ValueError("Weights DataFrame must be indexed by DatetimeIndex.")
+    return w.tail(1).astype(float).fillna(0.0)
+
+
+# =============================================================================
+# Main step (live)
 # =============================================================================
 
 def signal(
-    storage: Storage,
-    paths: StoragePaths,
+    storage,  # <-- LiveStore (or LiveArtifactStore)
     strat_cfg: dict,
     *,
     data_adapter: Optional[DataAdapter] = None,
 ) -> pd.DataFrame:
     """
     Live signal step (idempotent):
-      - Decide whether to retrain using (meta, retrain_freq, config_hash)
-      - Train and persist bundle/meta if needed
-      - Predict weights for latest slice
-      - Append latest weights to weights parquet idempotently (upsert by asof timestamp)
+      - Read live model/meta from storage (LiveStore)
+      - Retrain if policy says so; persist model/meta (and optional snapshot)
+      - Predict weights (DF, time-indexed)
+      - Append latest weights via storage.append_weights() (idempotent upsert by asof)
 
-    Returns: single-row DataFrame with latest weights (+ generated_at_utc)
+    Returns: single-row DataFrame indexed by asof with latest weights (+generated_at_utc, config_hash)
     """
     cfg = strat_cfg or {}
     run_cfg = cfg.get("run", {}) or {}
@@ -177,23 +125,27 @@ def signal(
 
     spec = RunSpec(**run_cfg)
 
+    # universe is used as the live namespace (XLE, XLE-SPY, etc.)
+    # if RunSpec has it, use that; else fall back.
+    universe = getattr(spec, "universe", None) or run_cfg.get("universe") or run_cfg.get("ticker") or "default"
+
+
     retrain_freq = live_cfg.get("retrain_freq", "1D")
     lookback = int(live_cfg.get("train_lookback_bars", 252))
     min_train = int(live_cfg.get("min_train_bars", 200))
 
-    model_key = paths.model_key(spec.strategy_name)
-    meta_key = paths.model_meta_key(spec.strategy_name)
-    latest_w_key =  paths.latest_weight_key(spec.strategy_name)
-
     now_iso = datetime.now(timezone.utc).isoformat()
     cfg_hash = config_hash(run_cfg)
 
-    # load existing artifacts
-    bundle: Optional[ModelBundle] = None
-    meta: Optional[dict] = None
-    if storage.exists(model_key) and storage.exists(meta_key):
-        bundle = storage.read_pickle(model_key)
-        meta = storage.read_json(meta_key)
+    data_adapter = data_adapter or DefaultDataAdapter()
+
+    # Build strategy once (needed for required features in both branches)
+    strat = create_strategy(spec.strategy_name)
+    req = strat.required_features(spec)
+
+    # Load existing live artifacts
+    bundle = storage.read_model(spec.strategy_name, universe)
+    meta = storage.read_model_meta(spec.strategy_name, universe) or None
 
     do_train = should_retrain(
         now_iso,
@@ -202,20 +154,12 @@ def signal(
         config_hash_now=cfg_hash,
     )
 
-    data_adapter = data_adapter or DefaultDataAdapter()
-
-    # build strategy once; safe to use for required_features in both branches
-    strat = create_strategy(spec.strategy_name)
-    req = strat.required_features(spec)
-
     if do_train:
         inputs_all = prepare_inputs(data_adapter, spec, required_cols=req)
         train_inputs = slice_train_window(inputs_all, lookback=lookback)
 
         if len(train_inputs.features) < min_train:
-            raise ValueError(
-                f"Not enough train data: {len(train_inputs.features)} < {min_train}"
-            )
+            raise ValueError(f"Not enough train data: {len(train_inputs.features)} < {min_train}")
 
         strat.fit(train_inputs, spec)
 
@@ -228,42 +172,50 @@ def signal(
             config_hash=cfg_hash,
         )
 
-        storage.write_pickle(bundle, model_key)
-        storage.write_json(
-            {
-                "trained_at": bundle.trained_at,
-                "train_end": bundle.train_end,
-                "retrain_freq": retrain_freq,
-                "train_lookback_bars": lookback,
-                "min_train_bars": min_train,
-                "feature_cols": bundle.feature_cols,
-                "ret_cols": bundle.ret_cols,
-                "config_hash": bundle.config_hash,
-                "bundle_version": getattr(bundle, "version", "v1"),
-            },
-            meta_key
+        meta_out = {
+            "trained_at": bundle.trained_at,
+            "train_end": bundle.train_end,
+            "retrain_freq": retrain_freq,
+            "train_lookback_bars": lookback,
+            "min_train_bars": min_train,
+            "feature_cols": bundle.feature_cols,
+            "ret_cols": bundle.ret_cols,
+            "config_hash": bundle.config_hash,
+            "bundle_version": getattr(bundle, "version", "v1"),
+        }
+
+        storage.write_model(
+            strategy=spec.strategy_name,
+            universe=universe,
+            bundle=bundle,
+            meta=meta_out,
+            snapshot=bool(live_cfg.get("snapshot_models", True)),
         )
 
     if bundle is None:
-        raise RuntimeError("No trained model available (missing model artifact/meta).")
+        raise RuntimeError("No trained live model available (missing model artifact/meta).")
 
     # Predict using latest available inputs; enforce schema from bundle
     inputs_now = prepare_inputs(data_adapter, spec, required_cols=req)
     inputs_now = enforce_bundle_schema(bundle, inputs_now)
 
-    w = bundle.model.predict(inputs_now, spec)
+    w_ts = bundle.model.predict(inputs_now, spec)  # EXPECTED: time-indexed DF (assets as columns)
 
-    latest_w = normalize_latest_weights(w)
+    latest_w = latest_row_df(w_ts)
 
-    # asof timestamp: prefer the model inputs index max
+    # align asof to actual aligned inputs index
     idx_now = inputs_now.features.index.intersection(inputs_now.ret.index)
     asof_ts = pd.Timestamp(idx_now.max()) if len(idx_now) else pd.Timestamp(now_iso)
 
-    latest_w.index = pd.Index([asof_ts], name="asof")
+    latest_w.index = pd.DatetimeIndex([asof_ts], name="asof")
     latest_w["generated_at_utc"] = now_iso
     latest_w["config_hash"] = cfg_hash
 
-    # Idempotent append/upsert by asof timestamp
-    append_idempotent_timeseries(storage, latest_w_key, latest_w, index_name="asof")
+    # Persist weights via live store (idempotent upsert by asof)
+    storage.append_weights(
+        strategy=spec.strategy_name,
+        universe=universe,
+        latest_w=latest_w,
+    )
 
     return latest_w

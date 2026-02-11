@@ -1,6 +1,6 @@
 {
   "bundle_version": "v1",
-  "config_hash": "947745b5e9a79306",
+  "config_hash": "50a0a70c0a5411d0",
   "feature_cols": [
     "XLE_close",
     "XLE_high",
@@ -19,5 +19,5 @@
   "retrain_freq": "1D",
   "train_end": "2026-02-10 05:00:00+00:00",
   "train_lookback_bars": 504,
-  "trained_at": "2026-02-10T22:43:18.483827+00:00"
+  "trained_at": "2026-02-11T02:01:11.004037+00:00"
 }

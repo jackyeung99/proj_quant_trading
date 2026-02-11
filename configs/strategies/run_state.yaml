@@ -10,8 +10,10 @@ run:
 
   params:
     state_var: XLE_rvol
+    min_frac: 0.0
     w_low: 0
-    w_high: 1.0
+    w_high: 3.0
+
 
 
 live:

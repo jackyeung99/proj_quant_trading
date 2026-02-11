@@ -78,6 +78,17 @@ class ModelInputs:
     features: pd.DataFrame
 
 
+@dataclass(frozen=True)
+class Position:
+    symbol: str
+    qty: float
+    side: str              # "long" | "short"
+    market_value: float    # dollars
+    current_price: float   # dollars
+    avg_entry_price: float # dollars
+    cost_basis: float      # dollars
+    unrealized_pl: float   # dollars
+    unrealized_plpc: float # fraction, e.g. 0.12
 
 # # ---------- Step specs ----------
 

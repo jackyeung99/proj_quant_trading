@@ -33,8 +33,9 @@ class StoragePaths:
     silver: str = "data/silver"
     gold: str = "data/gold"
     state: str = "data/_state"
-    models_dir: str ="data/models" 
-    execution_dir: str = "data/execution"
+    
+    models_dir: str ="artifacts/models" 
+    execution_dir: str = "artifacts/execution"
 
 
     # data construction pipeline

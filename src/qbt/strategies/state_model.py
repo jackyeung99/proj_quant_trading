@@ -115,11 +115,26 @@ class StateSignalModel(Strategy):
         sig = (S_used > float(self.tau_)).astype(float)
 
         # map signal -> weights; NaN -> 0 weight
-        w = np.where(sig.fillna(0.0).values > 0.5, self.w_high_, self.w_low_)
-        w = pd.Series(w, index=S_used.index, name="weight")
+        w_vals = np.where(
+            sig.fillna(0.0).values > 0.5,
+            self.w_high_,
+            self.w_low_,
+        )
 
-        # align to ret index (important in walk-forward)
+
+        asset = inputs.ret.columns[0]
+
+        # build time-indexed DataFrame
+        w = pd.DataFrame(
+            w_vals,
+            index=S_used.index,
+            columns=[asset],
+            dtype=float,
+        )
+
+        # align to returns index (important in walk-forward)
         w = w.reindex(inputs.ret.index).fillna(0.0)
+
         return w
     # ----------------------------
     # Helpers (unchanged)
