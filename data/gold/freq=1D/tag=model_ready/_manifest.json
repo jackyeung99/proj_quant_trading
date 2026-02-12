@@ -3,7 +3,7 @@
   "assets": [
     "XLE"
   ],
-  "created_at_utc": "2026-02-11T01:41:22.108161+00:00",
+  "created_at_utc": "2026-02-11T20:46:45.207926+00:00",
   "dataset": "gold_long_table",
   "freq": "1D",
   "paths": {
@@ -85,9 +85,9 @@
   },
   "shape": {
     "cols": 13,
-    "end_utc": "2026-02-10T05:00:00+00:00",
+    "end_utc": "2026-02-11T05:00:00+00:00",
     "n_assets": 1,
-    "rows": 1281,
+    "rows": 1282,
     "start_utc": "2021-01-04T05:00:00+00:00"
   },
   "spec": {

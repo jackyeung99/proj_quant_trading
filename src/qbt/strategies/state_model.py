@@ -147,7 +147,7 @@ class StateSignalModel(Strategy):
         return_col: str,
         min_frac: float = 0.10,
         ann_factor: int = 252,
-        n_grid: int = 201,
+        n_grid: int = 100,
     ) -> float | None:
         s = df_train[state_var].to_numpy()
         r = df_train[return_col].to_numpy()
