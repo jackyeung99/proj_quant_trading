@@ -4,6 +4,7 @@ from typing import Sequence
 
 import pandas as pd
 
+from qbt.core.logging import get_logger
 from qbt.storage.storage import Storage
 from qbt.storage.paths import StoragePaths
 from qbt.storage.feature_store import write_gold_long_with_manifest
@@ -14,7 +15,7 @@ from qbt.features.transforms import DAILY_TRANSFORMS
 from qbt.features.intraday_transforms import INTRA_FEATURE_FUNCS
 from qbt.data.loaders import load_multi_asset_flat_long
 
-
+logger = get_logger(__name__)
 
 def normalize_gold_cfg(gold_cfg: dict) -> dict:
     cfg = dict(gold_cfg or {})
@@ -117,8 +118,13 @@ def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict
 
     daily_cfg = cfg["daily_transforms"]
     assets = cfg["assets"]
-
     feature_specs = build_intra_feature_specs(cfg)
+
+    logger.info(
+        f"Gold start | input_freq={input_freq} market_tz={market_tz} cutoff_hour={cutoff_hour} "
+        f"assets={len(assets)} intra_features={len(cfg.get('intra_features', []) or [])} "
+        f"daily_transforms={len(daily_cfg)}"
+    )
 
     # 1) load intraday long
     df = load_multi_asset_flat_long(
@@ -131,16 +137,31 @@ def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict
         asset_col="ticker",
     )
 
+    if df is None or df.empty:
+        logger.warning("Gold: no intraday data loaded (empty)")
+        return pd.DataFrame()
+
+    logger.info(f"Loaded intraday long | rows={len(df)} cols={list(df.columns)}")
+
     # normalize once
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    before = len(df)
     df = (
         df.dropna(subset=["timestamp", "ticker"])
           .sort_values(["ticker", "timestamp"])
           .reset_index(drop=True)
     )
+    dropped = before - len(df)
+    if dropped:
+        logger.info(f"Normalized intraday | dropped_rows={dropped} remaining={len(df)}")
 
+    # compute per ticker
     frames: list[pd.DataFrame] = []
     for ticker, g in df.groupby("ticker", sort=False):
+        t0 = g["timestamp"].min()
+        t1 = g["timestamp"].max()
+        logger.info(f"Compute daily features | ticker={ticker} rows={len(g)} t0={t0} t1={t1}")
+
         frames.append(
             _per_ticker_daily(
                 g,
@@ -153,6 +174,7 @@ def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict
         )
 
     if not frames:
+        logger.warning("Gold: no per-ticker frames produced")
         return pd.DataFrame()
 
     gold = (
@@ -161,7 +183,13 @@ def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict
           .reset_index(drop=True)
     )
 
-    print(gold)
+    # small summary (avoid printing whole df)
+    g0 = gold["timestamp"].min() if "timestamp" in gold.columns else None
+    g1 = gold["timestamp"].max() if "timestamp" in gold.columns else None
+    logger.info(f"Gold assembled | rows={len(gold)} cols={len(gold.columns)} t0={g0} t1={g1}")
 
+    # write + manifest
     write_gold_long_with_manifest(storage, paths, gold, gold_cfg=gold_cfg)
+    logger.info("Gold write complete")
+
     return gold

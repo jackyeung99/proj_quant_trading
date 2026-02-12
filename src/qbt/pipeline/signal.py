@@ -5,11 +5,13 @@ from typing import Optional
 
 import pandas as pd
 
+from qbt.core.logging import get_logger
 from qbt.core.types import RunSpec, ModelInputs, ModelBundle
 from qbt.data.dataloader import DataAdapter, DefaultDataAdapter
 from qbt.strategies.strategy_registry import create_strategy
 from qbt.utils.config_parser import config_hash
 
+logger = get_logger(__name__)
 
 # =============================================================================
 # Retrain policy
@@ -105,7 +107,7 @@ def latest_row_df(w: pd.DataFrame) -> pd.DataFrame:
 # =============================================================================
 
 def signal(
-    storage,  # <-- LiveStore (or LiveArtifactStore)
+    storage,  # LiveStore
     strat_cfg: dict,
     *,
     data_adapter: Optional[DataAdapter] = None,
@@ -115,7 +117,7 @@ def signal(
       - Read live model/meta from storage (LiveStore)
       - Retrain if policy says so; persist model/meta (and optional snapshot)
       - Predict weights (DF, time-indexed)
-      - Append latest weights via storage.append_weights() (idempotent upsert by asof)
+      - Write latest weights + snapshot(asof) via storage.write_weights()
 
     Returns: single-row DataFrame indexed by asof with latest weights (+generated_at_utc, config_hash)
     """
@@ -125,10 +127,7 @@ def signal(
 
     spec = RunSpec(**run_cfg)
 
-    # universe is used as the live namespace (XLE, XLE-SPY, etc.)
-    # if RunSpec has it, use that; else fall back.
     universe = getattr(spec, "universe", None) or run_cfg.get("universe") or run_cfg.get("ticker") or "default"
-
 
     retrain_freq = live_cfg.get("retrain_freq", "1D")
     lookback = int(live_cfg.get("train_lookback_bars", 252))
@@ -143,9 +142,22 @@ def signal(
     strat = create_strategy(spec.strategy_name)
     req = strat.required_features(spec)
 
+    logger.info(
+        f"Signal start | strategy={spec.strategy_name} universe={universe} "
+        f"retrain_freq={retrain_freq} lookback={lookback} min_train={min_train}"
+    )
+
     # Load existing live artifacts
     bundle = storage.read_model(spec.strategy_name, universe)
     meta = storage.read_model_meta(spec.strategy_name, universe) or None
+
+    if meta:
+        logger.info(
+            f"Loaded model meta | trained_at={meta.get('trained_at')} train_end={meta.get('train_end')} "
+            f"config_hash={meta.get('config_hash')}"
+        )
+    else:
+        logger.info("No existing model meta found")
 
     do_train = should_retrain(
         now_iso,
@@ -155,13 +167,25 @@ def signal(
     )
 
     if do_train:
+        reason = "missing_meta" if meta is None else (
+            "config_changed" if (cfg_hash is not None and meta.get("config_hash") not in (None, cfg_hash)) else "freq"
+        )
+        logger.info(f"Retrain triggered | reason={reason}")
+
         inputs_all = prepare_inputs(data_adapter, spec, required_cols=req)
         train_inputs = slice_train_window(inputs_all, lookback=lookback)
 
-        if len(train_inputs.features) < min_train:
-            raise ValueError(f"Not enough train data: {len(train_inputs.features)} < {min_train}")
+        n_train = len(train_inputs.features)
+        logger.info(
+            f"Prepared train window | n_train={n_train} train_start={train_inputs.features.index.min()} "
+            f"train_end={train_inputs.features.index.max()}"
+        )
+
+        if n_train < min_train:
+            raise ValueError(f"Not enough train data: {n_train} < {min_train}")
 
         strat.fit(train_inputs, spec)
+        logger.info("Model fit complete")
 
         bundle = ModelBundle(
             model=strat,
@@ -191,6 +215,12 @@ def signal(
             meta=meta_out,
             snapshot=bool(live_cfg.get("snapshot_models", True)),
         )
+        logger.info(
+            f"Wrote model artifacts | trained_at={bundle.trained_at} train_end={bundle.train_end} "
+            f"snapshot_models={bool(live_cfg.get('snapshot_models', True))}"
+        )
+    else:
+        logger.info("Retrain skipped")
 
     if bundle is None:
         raise RuntimeError("No trained live model available (missing model artifact/meta).")
@@ -199,23 +229,35 @@ def signal(
     inputs_now = prepare_inputs(data_adapter, spec, required_cols=req)
     inputs_now = enforce_bundle_schema(bundle, inputs_now)
 
-    w_ts = bundle.model.predict(inputs_now, spec)  # EXPECTED: time-indexed DF (assets as columns)
-
-    latest_w = latest_row_df(w_ts)
-
-    # align asof to actual aligned inputs index
     idx_now = inputs_now.features.index.intersection(inputs_now.ret.index)
     asof_ts = pd.Timestamp(idx_now.max()) if len(idx_now) else pd.Timestamp(now_iso)
+
+    logger.info(
+        f"Prepared inference inputs | n={len(idx_now)} asof={asof_ts} "
+        f"features={inputs_now.features.shape} ret={inputs_now.ret.shape}"
+    )
+
+    w_ts = bundle.model.predict(inputs_now, spec)
+    latest_w = latest_row_df(w_ts)
 
     latest_w.index = pd.DatetimeIndex([asof_ts], name="asof")
     latest_w["generated_at_utc"] = now_iso
     latest_w["config_hash"] = cfg_hash
 
-    # Persist weights via live store (idempotent upsert by asof)
+    # log weights summary (avoid giant prints)
+    asset_cols = [c for c in latest_w.columns if c not in ("generated_at_utc", "config_hash")]
+    nonzero = int((latest_w[asset_cols].abs() > 1e-12).sum(axis=1).iloc[0]) if asset_cols else 0
+    logger.info(f"Predicted weights | asof={asof_ts} assets={len(asset_cols)} nonzero={nonzero}")
+
+    # Persist weights via live store (latest + snapshot)
     storage.write_weights(
         strategy=spec.strategy_name,
         universe=universe,
         latest_w=latest_w,
+        snapshot=bool(live_cfg.get("snapshot_weights", True)),
+    )
+    logger.info(
+        f"Wrote weights | asof={asof_ts} snapshot_weights={bool(live_cfg.get('snapshot_weights', True))}"
     )
 
     return latest_w

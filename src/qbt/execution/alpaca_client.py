@@ -130,7 +130,26 @@ class AlpacaTradingAPI:
         orders = self.list_open_orders(symbol=symbol)  # implement using alpaca get_orders(status="open")
         return len(orders) > 0
     
+    def list_open_orders(self, symbol: str | None = None):
+        """
+        GET /v2/orders?status=open[&symbols=XLE]
+        Returns list[dict]
+        """
+        url = self.base_url + "orders"
+        headers = self._headers()
+
+        params = {"status": "open"}
+        if symbol:
+            # Alpaca expects 'symbols' (comma-separated) for filtering multiple.
+            # For one symbol this is fine.
+            params["symbols"] = symbol
+
+        r = requests.get(url, headers=headers, params=params, timeout=self.timeout_s)
+        r.raise_for_status()
+        return r.json()
+
     
+
     def place_order(
             self,
             *,

@@ -1,0 +1,12 @@
+{
+  "asof": "2026-02-11 05:00:00+00:00",
+  "batch_id": "5a63f714debf",
+  "completed_at": "2026-02-12T01:39:22.342058+00:00",
+  "equity": 100489.35,
+  "exec_id": "727e79cbdf69",
+  "num_orders": 1,
+  "orders_key": "artifacts/orders/strategy=StateSignal/universe=XLE/batches/date=2026-02-12/5a63f714debf.parquet",
+  "run_id": "ea3016c1dec6",
+  "status": "completed",
+  "trades_key": "artifacts/trades/strategy=StateSignal/universe=XLE/batches/date=2026-02-12/5a63f714debf.parquet"
+}
