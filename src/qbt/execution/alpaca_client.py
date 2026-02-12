@@ -126,6 +126,11 @@ class AlpacaTradingAPI:
 
         return out
 
+    def has_open_orders(self, symbol: str | None = None) -> bool:
+        orders = self.list_open_orders(symbol=symbol)  # implement using alpaca get_orders(status="open")
+        return len(orders) > 0
+    
+    
     def place_order(
             self,
             *,

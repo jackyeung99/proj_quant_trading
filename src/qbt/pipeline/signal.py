@@ -212,7 +212,7 @@ def signal(
     latest_w["config_hash"] = cfg_hash
 
     # Persist weights via live store (idempotent upsert by asof)
-    storage.append_weights(
+    storage.write_weights(
         strategy=spec.strategy_name,
         universe=universe,
         latest_w=latest_w,

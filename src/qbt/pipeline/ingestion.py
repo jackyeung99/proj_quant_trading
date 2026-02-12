@@ -52,7 +52,7 @@ def ingest_one_source(storage: Storage, paths: StoragePaths, ingestion_cfg: dict
             continue
 
         store_key = paths.bronze_bars_key(freq=freq, ticker=ticker)
-        state_key = paths.bronze_bars_state(freq=freq, ticker=ticker)
+        state_key = paths.bronze_bars_state_key(freq=freq, ticker=ticker)
 
 
 

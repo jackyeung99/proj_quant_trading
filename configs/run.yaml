@@ -1,3 +1,7 @@
+logging:
+  level: INFO
+  log_file: "artifacts/logs/qbt.log"
+
 storage:
   config: "steps/storage.yaml"
 

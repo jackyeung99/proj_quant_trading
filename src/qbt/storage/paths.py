@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from typing import Optional
 
 
 def _clean(x: str) -> str:
     """
     Make a string safe for partition-style paths (strategy=..., etc.).
-    Keep it simple and predictable.
+    Keep it predictable across local FS + S3.
     """
     return (
         str(x).strip()
@@ -19,69 +20,78 @@ def _clean(x: str) -> str:
     )
 
 
+def _p(*parts: str) -> str:
+    """Join POSIX key parts safely."""
+    return str(PurePosixPath(*parts))
+
+
 @dataclass(frozen=True)
 class StoragePaths:
     """
-    Key layout for result artifacts.
+    Key layout for QBT artifacts.
 
-    IMPORTANT:
-    - This returns *keys* (POSIX-like strings), not local filesystem Paths.
-    - Your Storage backend decides how keys map to Local paths or S3 URIs.
+    Notes
+    -----
+    - All functions return *keys* (POSIX-like strings), not local filesystem Paths.
+    - Storage backend maps keys -> local paths or S3 URIs.
+    - Partition style: key=val folders for query-friendly datasets.
     """
-    results: str = "results"  # key prefix inside storage
+    # top-level namespaces (inside storage root)
+    results: str = "results"
     bronze: str = "data/bronze"
     silver: str = "data/silver"
     gold: str = "data/gold"
     state: str = "data/_state"
-    
-    models_dir: str ="artifacts/models" 
-    execution_dir: str = "artifacts/execution"
 
+    # artifacts
+    artifacts: str = "artifacts"
+    models_dir: str = "artifacts/models"
+    live_dir: str = "artifacts/live"              # weights + signals
+    execution_dir: str = "artifacts/execution"    # locks + last_exec
+    orders_dir: str = "artifacts/orders"          # planned orders (optional but useful)
+    trades_dir: str = "artifacts/trades"          # executed trade ledger
 
-    # data construction pipeline
+    # ---------------------------------------------------------------------
+    # Data construction pipeline
+    # ---------------------------------------------------------------------
     # ----- bronze keys -----
-    def bronze_bars_key(self, *, freq: str, ticker: str) -> str:
-        return f"{self.bronze}/freq={freq}/ticker={ticker}/bars.parquet"
-    
     def bronze_bars_dir(self, *, freq: str, ticker: str) -> str:
-        return f"{self.bronze}/freq={freq}/ticker={ticker}"
-    
-    def bronze_bars_state(self, *, freq: str, ticker: str) -> str:
-         return f"{self.bronze}/freq={freq}/ticker={ticker}/state.json"
+        return _p(self.bronze, f"freq={_clean(freq)}", f"ticker={_clean(ticker)}")
+
+    def bronze_bars_key(self, *, freq: str, ticker: str) -> str:
+        return _p(self.bronze_bars_dir(freq=freq, ticker=ticker), "bars.parquet")
+
+    def bronze_bars_state_key(self, *, freq: str, ticker: str) -> str:
+        return _p(self.bronze_bars_dir(freq=freq, ticker=ticker), "state.json")
 
     # ----- silver keys -----
     def silver_bars_key(self, *, freq: str, ticker: str) -> str:
-        return f"{self.silver}/freq={freq}/ticker={ticker}/bars.parquet"
+        return _p(self.silver, f"freq={_clean(freq)}", f"ticker={_clean(ticker)}", "bars.parquet")
 
     # ----- gold keys -----
     def gold_table_key(self, *, freq: str, tag: str = "default") -> str:
-        return f"{self.gold}/freq={freq}/tag={tag}/table.parquet"
+        return _p(self.gold, f"freq={_clean(freq)}", f"tag={_clean(tag)}", "table.parquet")
 
     def gold_manifest_key(self, *, freq: str, tag: str = "default") -> str:
-        return f"{self.gold}/freq={freq}/tag={tag}/_manifest.json"
+        return _p(self.gold, f"freq={_clean(freq)}", f"tag={_clean(tag)}", "_manifest.json")
 
     # ----- state keys -----
     def source_state_key(self, *, source: str, dataset: str) -> str:
-        return f"{self.state}/{source}/{dataset}.json"
-    
+        return _p(self.state, _clean(source), f"{_clean(dataset)}.json")
 
-    # Back testing
-    # ---- global artifacts ----
+    # ---------------------------------------------------------------------
+    # Backtesting (global + per-run)
+    # ---------------------------------------------------------------------
     def runs_key(self) -> str:
-        return str(PurePosixPath(self.results) / "runs.parquet")
+        return _p(self.results, "runs.parquet")
 
     def metrics_key(self) -> str:
-        return str(PurePosixPath(self.results) / "metrics.parquet")
+        return _p(self.results, "metrics.parquet")
 
-
-    # ---- per-run artifacts ----
     def run_meta_key(self, run_id: str) -> str:
-        return str(PurePosixPath(self.results) / "runs" / _clean(run_id) / "meta.json")
+        return _p(self.results, "runs", f"run_id={_clean(run_id)}", "meta.json")
 
     def run_timeseries_key(self, strategy: str, universe: str, run_id: str) -> str:
-        """
-        One file per run (MVP). Partition-style folders help filtering/query later.
-        """
         base = PurePosixPath(self.results) / "timeseries"
         p = (
             base
@@ -90,16 +100,41 @@ class StoragePaths:
             / f"run_id={_clean(run_id)}"
         )
         return str(p / "timeseries.parquet")
-    
 
-    # live 
+    # ---------------------------------------------------------------------
+    # Live artifacts: models + weights + execution guards + orders + trades
+    # ---------------------------------------------------------------------
+    # ----- models -----
+    def model_key(self, strategy: str, universe: str = "default", tag: str = "latest") -> str:
+        return _p(self.models_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", f"tag={_clean(tag)}", "model.pkl")
 
-    def model_key(self, strat_name):
-        return f"{self.models_dir}/{strat_name}/model.pkl"
+    def model_meta_key(self, strategy: str, universe: str = "default", tag: str = "latest") -> str:
+        return _p(self.models_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", f"tag={_clean(tag)}", "meta.json")
 
+    # ----- weights (signal output) -----
+    def weights_latest_key(self, strategy: str, universe: str) -> str:
+        return _p(self.live_dir, "weights", f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "latest.parquet")
 
-    def model_meta_key(self, strat_name):
-        return f"{self.models_dir}/{strat_name}/meta.json"
+    def weights_snapshot_key(self, strategy: str, universe: str, asof: str) -> str:
+        return _p(self.live_dir, "weights", f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "snapshots", f"asof={_clean(asof)}.parquet")
 
-    def latest_weight_key(self, strategy: str) -> str:
-        return f"{self.execution_dir}/strategy={strategy}/weights.parquet"
+    # ----- execution guards -----
+    def exec_lock_key(self, strategy: str, universe: str) -> str:
+        return _p(self.execution_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "lock.json")
+
+    def last_exec_key(self, strategy: str, universe: str) -> str:
+        return _p(self.execution_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "last_exec.json")
+
+    # ----- planned orders (optional but useful) -----
+    def orders_root(self, strategy: str, universe: str) -> str:
+        return _p(self.orders_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "batches")
+
+    def orders_batch_key(self, strategy: str, universe: str, date: str, batch_id: str) -> str:
+        return _p(self.orders_root(strategy, universe), f"date={_clean(date)}", f"{_clean(batch_id)}.parquet")
+
+    # ----- trades ledger (executed) -----
+    def trades_root(self, strategy: str, universe: str) -> str:
+        return _p(self.trades_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "batches")
+
+    def trades_batch_key(self, strategy: str, universe: str, date: str, batch_id: str) -> str:
+        return _p(self.trades_root(strategy, universe), f"date={_clean(date)}", f"{_clean(batch_id)}.parquet")

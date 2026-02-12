@@ -1,2 +1,3 @@
 strategy_name: 'StateSignal'
-dry_run: False
+universe: 'XLE'
+dry_run: True

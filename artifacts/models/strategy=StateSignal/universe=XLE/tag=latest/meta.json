@@ -1,0 +1,23 @@
+{
+  "bundle_version": "v1",
+  "config_hash": "50a0a70c0a5411d0",
+  "feature_cols": [
+    "XLE_close",
+    "XLE_high",
+    "XLE_low",
+    "XLE_open",
+    "XLE_ret_co",
+    "XLE_ret_oc",
+    "XLE_rv",
+    "XLE_rvol",
+    "XLE_volume"
+  ],
+  "min_train_bars": 200,
+  "ret_cols": [
+    "XLE"
+  ],
+  "retrain_freq": "1D",
+  "train_end": "2026-02-11 05:00:00+00:00",
+  "train_lookback_bars": 504,
+  "trained_at": "2026-02-12T01:15:07.477476+00:00"
+}

@@ -93,18 +93,28 @@ class BacktestStore:
         return pd.concat([df, row_df], ignore_index=True)
 
 class LiveStore:
+    """
+    Live artifact store (signal -> execution).
+
+    Mental model:
+      - Signal writes weights: latest pointer + immutable snapshot per asof
+      - Execution uses guards: lock + last_exec (idempotency)
+      - Execution writes: orders batch (planned) + trades batch (ledger)
+    """
+
     def __init__(self, storage: Storage, paths: StoragePaths):
         self.storage = storage
         self.paths = paths
 
-    # ---------- model artifacts ----------
-
+    # ---------------------------------------------------------------------
+    # Models
+    # ---------------------------------------------------------------------
     def read_model(self, strategy: str, universe: str) -> Optional[ModelBundle]:
-        key = self.paths.model_key(strategy)
+        key = self.paths.model_key(strategy=strategy, universe=universe, tag="latest")
         return self.storage.read_pickle(key) if self.storage.exists(key) else None
 
     def read_model_meta(self, strategy: str, universe: str) -> Dict[str, Any]:
-        key = self.paths.model_meta_key(strategy)
+        key = self.paths.model_meta_key(strategy=strategy, universe=universe, tag="latest")
         return self.storage.read_json(key) if self.storage.exists(key) else {}
 
     def write_model(
@@ -116,52 +126,165 @@ class LiveStore:
         meta: Dict[str, Any],
         snapshot: bool = True,
     ) -> None:
-        # write "latest"
-        self.storage.write_pickle(bundle, self.paths.model_key(strategy))
-        self.storage.write_json(meta, self.paths.model_meta_key(strategy))
+        # latest
+        self.storage.write_pickle(bundle, self.paths.model_key(strategy=strategy, universe=universe, tag="latest"))
+        self.storage.write_json(meta, self.paths.model_meta_key(strategy=strategy, universe=universe, tag="latest"))
 
-        # optional: snapshot for rollback/debug
+        # snapshot by trained_at (optional)
         if snapshot:
-            snap_key = self.paths.model_key(strategy, meta.get("trained_at", "unknown"))
-            snap_meta_key = self.paths.model_meta_key(strategy, meta.get("trained_at", "unknown"))
-            self.storage.write_pickle(bundle, snap_key)
-            self.storage.write_json(meta, snap_meta_key)
+            tag = str(meta.get("trained_at", "unknown"))
+            self.storage.write_pickle(bundle, self.paths.model_key(strategy=strategy, universe=universe, tag=tag))
+            self.storage.write_json(meta, self.paths.model_meta_key(strategy=strategy, universe=universe, tag=tag))
 
-    # ---------- weights ----------
-
-    def append_weights(
+    # ---------------------------------------------------------------------
+    # Weights (signal output): latest + snapshot(asof)
+    # ---------------------------------------------------------------------
+    def write_weights(
         self,
         *,
         strategy: str,
         universe: str,
-        latest_w: pd.DataFrame,  # single-row df indexed by asof
-    ) -> pd.DataFrame:
+        latest_w: pd.DataFrame,         # single-row df indexed by asof
+        snapshot: bool = True,
+    ) -> None:
+        """
+        Store weights as:
+          - latest.parquet (overwrite)
+          - snapshots/asof=...parquet (optional, overwrite-by-key)
+        """
         if latest_w.shape[0] != 1:
-            raise StorageError("latest_w must be a single-row DataFrame.")
-
-        key = self.paths.latest_weight_key(strategy)
+            raise StorageError("latest_w must be a single-row DataFrame indexed by asof.")
 
         row = latest_w.copy()
         row.index.name = row.index.name or "asof"
-        asof = row.index[0]
+        asof = str(row.index[0])
 
-        if self.storage.exists(key):
-            prev = self.storage.read_parquet(key)
-            prev.index.name = "asof"
+        # write latest pointer (overwrite)
+        latest_key = self.paths.weights_latest_key(strategy, universe)
+        self.storage.write_parquet(row, latest_key)
 
-            all_cols = prev.columns.union(row.columns)
-            prev = prev.reindex(columns=all_cols)
-            row = row.reindex(columns=all_cols)
-
-            # idempotent overwrite for same timestamp
-            prev = prev.loc[prev.index != asof]
-            out = pd.concat([prev, row]).sort_index()
-        else:
-            out = row
-
-        self.storage.write_parquet(out, key)
-        return out
+        # write immutable snapshot (idempotent overwrite on same asof)
+        if snapshot:
+            snap_key = self.paths.weights_snapshot_key(strategy, universe, asof=asof)
+            self.storage.write_parquet(row, snap_key)
 
     def read_weights(self, strategy: str, universe: str) -> pd.DataFrame:
-        key = self.paths.latest_weight_key(strategy)
+        """
+        Read latest weights (single-row df indexed by asof).
+        """
+        key = self.paths.weights_latest_key(strategy, universe)
+        return self.storage.read_parquet(key) if self.storage.exists(key) else pd.DataFrame()
+
+    def read_weights_snapshot(self, strategy: str, universe: str, *, asof: str) -> pd.DataFrame:
+        """
+        Read a specific asof snapshot (single-row df).
+        """
+        key = self.paths.weights_snapshot_key(strategy, universe, asof=asof)
+        return self.storage.read_parquet(key) if self.storage.exists(key) else pd.DataFrame()
+
+    # ---------------------------------------------------------------------
+    # Execution guards: lock + last_exec
+    # ---------------------------------------------------------------------
+    def read_lock(self, *, strategy: str, universe: str) -> Dict[str, Any]:
+        key = self.paths.exec_lock_key(strategy, universe)
+        return self.storage.read_json(key) if self.storage.exists(key) else {}
+
+    def write_lock(self, *, strategy: str, universe: str, meta: Dict[str, Any]) -> None:
+        key = self.paths.exec_lock_key(strategy, universe)
+        self.storage.write_json(meta, key)
+
+    def clear_lock(self, *, strategy: str, universe: str) -> None:
+        """
+        Best-effort. If Storage doesn't support delete yet, keep a tombstone.
+        """
+        key = self.paths.exec_lock_key(strategy, universe)
+        if hasattr(self.storage, "delete") and callable(getattr(self.storage, "delete")):
+            self.storage.delete(key)  # type: ignore[attr-defined]
+        else:
+            self.storage.write_json({"locked": False}, key)
+
+    def read_last_exec(self, *, strategy: str, universe: str) -> Dict[str, Any]:
+        key = self.paths.last_exec_key(strategy, universe)
+        return self.storage.read_json(key) if self.storage.exists(key) else {}
+
+    def write_last_exec(self, *, strategy: str, universe: str, meta: Dict[str, Any]) -> None:
+        key = self.paths.last_exec_key(strategy, universe)
+        self.storage.write_json(meta, key)
+
+    def already_executed_asof(self, *, strategy: str, universe: str, asof: str) -> bool:
+        m = self.read_last_exec(strategy=strategy, universe=universe)
+        return (m.get("asof") == asof) and (m.get("status") in {"submitted", "completed"})
+
+    # ---------------------------------------------------------------------
+    # Planned orders (optional but useful for idempotency/auditing)
+    # ---------------------------------------------------------------------
+    def write_orders_batch(
+        self,
+        *,
+        strategy: str,
+        universe: str,
+        orders: pd.DataFrame,
+        batch_id: str,
+        timestamp_col: str = "timestamp",
+    ) -> str:
+        if orders.empty:
+            raise StorageError("orders is empty")
+        if timestamp_col not in orders.columns:
+            raise StorageError(f"orders must include '{timestamp_col}' column")
+
+        ts = pd.to_datetime(orders[timestamp_col].iloc[0], utc=True, errors="coerce")
+        if pd.isna(ts):
+            raise StorageError(f"Invalid {timestamp_col} value: {orders[timestamp_col].iloc[0]}")
+
+        date = ts.strftime("%Y-%m-%d")
+        key = self.paths.orders_batch_key(strategy, universe, date=date, batch_id=batch_id)
+        self.storage.write_parquet(orders, key)
+        return key
+
+    def read_orders(
+        self,
+        *,
+        strategy: str,
+        universe: str,
+        date: Optional[str] = None,
+    ) -> pd.DataFrame:
+        root = self.paths.orders_root(strategy, universe)
+        key = f"{root}/date={date}" if date else root
+        return self.storage.read_parquet(key) if self.storage.exists(key) else pd.DataFrame()
+
+    # ---------------------------------------------------------------------
+    # Trades ledger (executed): batches dataset
+    # ---------------------------------------------------------------------
+    def write_trades_batch(
+        self,
+        *,
+        strategy: str,
+        universe: str,
+        trades: pd.DataFrame,
+        batch_id: str,
+        timestamp_col: str = "timestamp",
+    ) -> str:
+        if trades.empty:
+            raise StorageError("trades is empty")
+        if timestamp_col not in trades.columns:
+            raise StorageError(f"trades must include '{timestamp_col}' column")
+
+        ts = pd.to_datetime(trades[timestamp_col].iloc[0], utc=True, errors="coerce")
+        if pd.isna(ts):
+            raise StorageError(f"Invalid {timestamp_col} value: {trades[timestamp_col].iloc[0]}")
+
+        date = ts.strftime("%Y-%m-%d")
+        key = self.paths.trades_batch_key(strategy, universe, date=date, batch_id=batch_id)
+        self.storage.write_parquet(trades, key)
+        return key
+
+    def read_trades(
+        self,
+        *,
+        strategy: str,
+        universe: str,
+        date: Optional[str] = None,
+    ) -> pd.DataFrame:
+        root = self.paths.trades_root(strategy, universe)
+        key = f"{root}/date={date}" if date else root
         return self.storage.read_parquet(key) if self.storage.exists(key) else pd.DataFrame()

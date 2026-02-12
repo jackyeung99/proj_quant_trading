@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import logging
 import sys
 from typing import Optional
@@ -19,34 +20,35 @@ def setup_logging(
     fmt: str = _LOG_FORMAT,
     datefmt: str = _DATE_FORMAT,
     force: bool = False,
+    log_file: Optional[str | Path] = None,   
 ) -> None:
     """
     Configure global logging for the application.
 
-    Call this ONCE at program entry (CLI, script, Dash app).
-
-    Parameters
-    ----------
-    level : int
-        Logging level (logging.INFO, logging.DEBUG, etc.)
-    stream : object, optional
-        Output stream (defaults to sys.stdout)
-    fmt : str
-        Log message format
-    datefmt : str
-        Date/time format
-    force : bool
-        If True, reconfigure logging even if handlers exist
-        (useful in notebooks or Dash reloads)
+    Adds optional file logging.
     """
     if stream is None:
         stream = sys.stdout
 
+    handlers = []
+
+    # Console handler
+    console_handler = logging.StreamHandler(stream)
+    console_handler.setFormatter(logging.Formatter(fmt, datefmt))
+    handlers.append(console_handler)
+
+    # File handler (optional)
+    if log_file is not None:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        file_handler = logging.FileHandler(log_path)
+        file_handler.setFormatter(logging.Formatter(fmt, datefmt))
+        handlers.append(file_handler)
+
     logging.basicConfig(
         level=level,
-        format=fmt,
-        datefmt=datefmt,
-        handlers=[logging.StreamHandler(stream)],
+        handlers=handlers,
         force=force,
     )
 
