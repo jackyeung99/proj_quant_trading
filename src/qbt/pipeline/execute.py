@@ -268,14 +268,14 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
         )
 
         # Execute sells first
-        # for o in [x for x in orders if x["side"] == "sell"]:
-        #     logger.info(f"Submitting SELL | symbol={o['symbol']} notional={o['notional']:.2f}")
-        #     client.place_order(symbol=o["symbol"], side="sell", notional=o["notional"])
+        for o in [x for x in orders if x["side"] == "sell"]:
+            logger.info(f"Submitting SELL | symbol={o['symbol']} notional={o['notional']:.2f}")
+            client.place_order(symbol=o["symbol"], side="sell", notional=o["notional"])
 
-        # # Execute buys after
-        # for o in [x for x in orders if x["side"] == "buy"]:
-        #     logger.info(f"Submitting BUY  | symbol={o['symbol']} notional={o['notional']:.2f}")
-        #     client.place_order(symbol=o["symbol"], side="buy", notional=o["notional"])
+        # Execute buys after
+        for o in [x for x in orders if x["side"] == "buy"]:
+            logger.info(f"Submitting BUY  | symbol={o['symbol']} notional={o['notional']:.2f}")
+            client.place_order(symbol=o["symbol"], side="buy", notional=o["notional"])
 
         # ------------------------------------------------------------------
         # Save trades parquet (ledger)

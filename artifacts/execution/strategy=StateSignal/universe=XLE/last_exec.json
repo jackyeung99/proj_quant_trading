@@ -1,12 +1,12 @@
 {
-  "asof": "2026-02-11 05:00:00+00:00",
-  "batch_id": "5a63f714debf",
-  "completed_at": "2026-02-12T01:39:22.342058+00:00",
-  "equity": 100489.35,
-  "exec_id": "727e79cbdf69",
+  "asof": "2026-02-12 05:00:00+00:00",
+  "batch_id": "f5e9344a9e75",
+  "completed_at": "2026-02-12T21:01:04.280130+00:00",
+  "equity": 99556.89,
+  "exec_id": "9ce456fe3eee",
   "num_orders": 1,
-  "orders_key": "artifacts/orders/strategy=StateSignal/universe=XLE/batches/date=2026-02-12/5a63f714debf.parquet",
-  "run_id": "ea3016c1dec6",
+  "orders_key": "artifacts/orders/strategy=StateSignal/universe=XLE/batches/date=2026-02-12/f5e9344a9e75.parquet",
+  "run_id": "2dadd5fc0b59",
   "status": "completed",
-  "trades_key": "artifacts/trades/strategy=StateSignal/universe=XLE/batches/date=2026-02-12/5a63f714debf.parquet"
+  "trades_key": "artifacts/trades/strategy=StateSignal/universe=XLE/batches/date=2026-02-12/f5e9344a9e75.parquet"
 }
