@@ -13,7 +13,7 @@ run:
     min_frac: 0.0
     w_low: 0
     w_high: 3.0
-
+    weight_allocation: 'binary'
 
 
 live:

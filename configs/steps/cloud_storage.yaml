@@ -1,0 +1,5 @@
+
+backend: s3
+bucket: quant_trading
+prefix: ''
+region: us-east-2

@@ -23,6 +23,7 @@ class StateSignalModel(Strategy):
         self.w_low_: float | None = None
         self.w_high_: float | None = None
         self.state_var_: str | None = None
+        self.weight_allocation: str | None = None
 
     def parse_params(self, spec: RunSpec) -> dict:
         params = spec.params or {}
@@ -36,6 +37,7 @@ class StateSignalModel(Strategy):
             "min_frac": float(params.get("min_frac", 0.10)),
             "ann_factor": int(params.get("ann_factor", 252)),
             "gamma": float(params.get("gamma", 5.0)),
+            "weight_type": str(params.get('weight_allocation', 'binary')),
             "w_min": float(params.get("w_min", 0.0)),
             "w_max": float(params.get("w_high", 3.0)),
             "eps": float(params.get("eps", 1e-12)),
@@ -82,16 +84,19 @@ class StateSignalModel(Strategy):
             self.tau_, self.w_low_, self.w_high_ = np.nan, 0.0, 0.0
             return
 
-        w_low, w_high = self.estimate_weights_meanvar(
-            df,
-            state_var="S_used",
-            return_col="ret",
-            tau=float(tau),
-            gamma=p["gamma"],
-            w_min=p["w_min"],
-            w_max=p["w_max"],
-            eps=p["eps"],
-        )
+        if self.weight_allocation == 'mean_var':
+            w_low, w_high = self.estimate_weights_meanvar(
+                df,
+                state_var="S_used",
+                return_col="ret",
+                tau=float(tau),
+                gamma=p["gamma"],
+                w_min=p["w_min"],
+                w_max=p["w_max"],
+                eps=p["eps"],
+            )
+        else:
+            w_low, w_high = 1, 0
 
         self.tau_ = float(tau)
         self.w_low_ = float(w_low)

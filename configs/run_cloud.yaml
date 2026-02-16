@@ -1,0 +1,29 @@
+logging:
+  level: INFO
+  log_file: "artifacts/logs/qbt.log"
+
+storage:
+  config: "steps/cloud_storage.yaml"
+
+sources:
+  config: "steps/sources.yaml"
+
+
+ingestion:
+  enabled: True
+  config: "steps/ingestion.yaml"
+
+silver:
+  enabled: True
+
+gold:
+  enabled: True
+  config: "steps/build_model_table.yaml"
+
+signal:
+  enabled: True
+  config: "strategies/run_state.yaml"
+
+execution:
+  enabled: True
+  config: "steps/execution.yaml"
