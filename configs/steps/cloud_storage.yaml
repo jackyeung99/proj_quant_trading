@@ -1,5 +1,5 @@
 
 backend: s3
-bucket: quant_trading
-prefix: ''
+bucket: quant-trading-project
+prefix: 'quant-trading'
 region: us-east-2

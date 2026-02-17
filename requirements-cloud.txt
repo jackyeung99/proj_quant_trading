@@ -1,0 +1,15 @@
+arch
+numpy
+pandas
+pandas_datareader
+pandas_market_calendars
+requests
+retry_requests
+s3fs
+scikit-learn
+statsmodels
+PyYAML
+yfinance
+python-dateutil
+pyarrow
+python-dotenv

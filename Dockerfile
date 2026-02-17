@@ -28,7 +28,7 @@ RUN python -m pip install --upgrade pip && \
 COPY pyproject.toml /app/pyproject.toml
 COPY src /app/src
 COPY configs /app/configs
-COPY scripts /app/script
+COPY scripts /app/scripts
 
 # If you want editable install (optional). If you don't need it, remove this line.
 RUN pip install -e .
@@ -36,5 +36,5 @@ RUN pip install -e .
 RUN mkdir -p /app/data
 
 ENV CFG_PATH=/app/configs/run_all_cloud.yaml
-CMD ["python", "-m",  "/app/scripts/run_pipeline.py", "--cfg", "/app/configs/run_all_cloud.yaml"]
+CMD ["python",  "/app/scripts/run_pipeline.py", "--cfg", "/app/configs/run_cloud.yaml"]
 
