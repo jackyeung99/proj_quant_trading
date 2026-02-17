@@ -1,3 +1,10 @@
 strategy_name: 'StateSignal'
 universe: 'XLE'
 dry_run: True
+holding_period:
+    enabled: true
+    mode: "liquidate"          # or "flat_then_rebalance" if you later want both
+    tif: "opg"                 # "opg" next open, "cls" close, "day" immediate
+    symbols: null              # null => all positions, or ["XLE","XLF"]
+    include_shorts: true
+    skip_if_open_order: true

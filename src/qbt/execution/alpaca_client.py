@@ -232,6 +232,120 @@ class AlpacaTradingAPI:
 
         return r.json()
 
+    def liquidate(
+        self,
+        *,
+        symbol: str | None = None,
+        at_open: bool = False,
+        at_close: bool = False,
+        skip_if_open_order: bool = True,
+        include_shorts: bool = True,
+        client_order_id_prefix: str = "liq",
+    ) -> Dict[str, Any]:
+        """
+        Generic liquidation function.
+
+        Parameters
+        ----------
+        symbol : optional str
+            If provided, liquidate only this symbol.
+            Otherwise liquidate all active positions.
+
+        at_open : bool
+            If True, submit Market-On-Open (opg).
+
+        at_close : bool
+            If True, submit Market-On-Close (cls).
+
+        Default behavior (both False):
+            Regular market order (day).
+
+        Returns
+        -------
+        dict:
+            {
+              "submitted": [...],
+              "skipped": [...],
+              "errors": [...]
+            }
+        """
+
+        if at_open and at_close:
+            raise ValueError("Cannot set both at_open and at_close=True")
+
+        if at_open:
+            tif: TimeInForce = "opg"
+        elif at_close:
+            tif = "cls"
+        else:
+            tif = "day"
+
+        positions = self.get_active_positions()
+
+        if symbol:
+            symbols = [symbol]
+        else:
+            symbols = list(positions.keys())
+
+        submitted = []
+        skipped = []
+        errors = []
+
+        for sym in symbols:
+            pos = positions.get(sym)
+            if not pos or _to_float(pos.qty) == 0:
+                skipped.append({"symbol": sym, "reason": "no_position"})
+                continue
+
+            if skip_if_open_order:
+                try:
+                    if self.has_open_orders(symbol=sym):
+                        skipped.append({"symbol": sym, "reason": "open_order_exists"})
+                        continue
+                except Exception as e:
+                    skipped.append({"symbol": sym, "reason": f"open_order_check_failed: {e}"})
+                    continue
+
+            qty = abs(_to_float(pos.qty))
+            if qty <= 0:
+                skipped.append({"symbol": sym, "reason": "invalid_qty"})
+                continue
+
+            side = pos.side.lower()
+            if side == "long":
+                close_side: Side = "sell"
+            elif side == "short":
+                if not include_shorts:
+                    skipped.append({"symbol": sym, "reason": "short_skipped"})
+                    continue
+                close_side = "buy"
+            else:
+                skipped.append({"symbol": sym, "reason": "unknown_side"})
+                continue
+
+            client_order_id = f"{client_order_id_prefix}_{sym}_{int(_time.time())}"[:48]
+
+            try:
+                order = self.place_order(
+                    symbol=sym,
+                    side=close_side,
+                    order_type="market",
+                    time_in_force=tif,
+                    qty=qty,
+                    position_intent=(
+                        "sell_to_close" if close_side == "sell" else "buy_to_close"
+                    ),
+                    client_order_id=client_order_id,
+                )
+                submitted.append(order)
+            except Exception as e:
+                errors.append({"symbol": sym, "error": str(e)})
+
+        return {
+            "submitted": submitted,
+            "skipped": skipped,
+            "errors": errors,
+        }
 
     def _headers(self) -> dict:
         if not self.api_key or not self.api_secret:
