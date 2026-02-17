@@ -330,41 +330,43 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
         # 0) Optional holding-period liquidation (before rebalance)
         # --------------------------------------------------------------
         hp_result: Optional[dict] = None
-        if hp_enabled and hp_mode in ("liquidate", "liquidate_then_rebalance", "rebalance_then_liquidate"):
-            if hp_mode in ("liquidate", "liquidate_then_rebalance"):
-                hp_result = _maybe_liquidate_for_holding_period(
-                    client,
-                    dry_run=dry_run,
-                    enabled=True,
-                    mode=hp_mode,
-                    tif=hp_tif,
-                    symbols=hp_symbols,
-                    include_shorts=hp_include_shorts,
-                    skip_if_open_order=hp_skip_if_open_order,
-                )
-                if hp_fail_on_errors and hp_result and hp_result.get("errors"):
-                    return {
-                        "strategy_name": strat_name,
-                        "universe": universe,
-                        "orders": [],
-                        "dry_run": dry_run,
-                        "reason": "holding_period_liquidation_errors",
-                        "holding_period": hp_result,
-                    }
-                if hp_mode == "liquidate":
-                    return {
-                        "strategy_name": strat_name,
-                        "universe": universe,
-                        "orders": [],
-                        "dry_run": dry_run,
-                        "reason": "holding_period_liquidation_only",
-                        "holding_period": hp_result,
-                    }
+        if hp_enabled and hp_mode in ("liquidate", "liquidate_then_rebalance"):
+            hp_result = _maybe_liquidate_for_holding_period(
+                client,
+                dry_run=dry_run,
+                enabled=True,
+                mode=hp_mode,
+                tif=hp_tif,
+                symbols=hp_symbols,
+                include_shorts=hp_include_shorts,
+                skip_if_open_order=hp_skip_if_open_order,
+            )
 
+            if hp_fail_on_errors and hp_result and hp_result.get("errors"):
+                return {
+                    "strategy_name": strat_name,
+                    "universe": universe,
+                    "orders": [],
+                    "dry_run": dry_run,
+                    "reason": "holding_period_liquidation_errors",
+                    "holding_period": hp_result,
+                }
+            if hp_mode == "liquidate":
+                return {
+                    "strategy_name": strat_name,
+                    "universe": universe,
+                    "orders": [],
+                    "dry_run": dry_run,
+                    "reason": "holding_period_liquidation_only",
+                    "holding_period": hp_result,
+                }
+                
+                
         # --------------------------------------------------------------
         # 1) Load weights + idempotency
         # --------------------------------------------------------------
         weights_ts, asof, target_w = _load_target_weights(storage, strat=strat_name, universe=universe)
+
         if weights_ts is None or asof is None or target_w is None:
             logger.warning(f"No target weights found | strategy={strat_name} universe={universe}")
             return {
