@@ -10,18 +10,18 @@ sources:
 
 
 ingestion:
-  enabled: True
+  enabled: False
   config: "steps/ingestion.yaml"
 
 silver:
-  enabled: True
+  enabled: False
 
 gold:
-  enabled: True
+  enabled: False
   config: "steps/build_model_table.yaml"
 
 signal:
-  enabled: True
+  enabled: False
   config: "strategies/run_state.yaml"
 
 execution:

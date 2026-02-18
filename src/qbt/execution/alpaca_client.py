@@ -6,7 +6,7 @@ import time as _time
 from dataclasses import dataclass
 from typing import Optional, Sequence, Union, Mapping, Any, Dict, Literal
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, List
 import math
 import requests
 
@@ -44,12 +44,14 @@ class AlpacaTradingAPI:
         self, 
         cfg: Mapping[str, Any] | None = None,
         base_url: str = "https://paper-api.alpaca.markets/v2/",
+        data_base_url: str = "https://data.alpaca.markets",
         timeout_s: int = 60,
     ):
 
         self.cfg = cfg or {}
 
         self.base_url = base_url
+        self.data_base_url = data_base_url
         self.timeout_s = int(timeout_s)
 
         self.api_key = self.cfg.get(
@@ -78,9 +80,119 @@ class AlpacaTradingAPI:
 
         # equity is a string, convert to float
         return float(js["equity"])
+    
 
+    def get_latest_prices(self, symbols: List[str]) -> Dict[str, float]:
+        """
+        Fetch latest prices from Alpaca Data API.
 
+        Price selection priority:
+        1) Mid-quote = (bid + ask) / 2
+        2) Bid only
+        3) Ask only
+        4) Last trade price (fallback)
+        5) Skip if no usable price
 
+        Returns:
+            dict[symbol -> price]
+        """
+        if not symbols:
+            return {}
+
+        uniq = list(dict.fromkeys([str(s).upper() for s in symbols]))
+
+        headers = self._headers()
+
+        # --------------------------------------------------
+        # 1) Try latest QUOTES first
+        # --------------------------------------------------
+        url_q = f"{self.data_base_url}/v2/stocks/quotes/latest"
+        r = requests.get(
+            url_q,
+            headers=headers,
+            params={"symbols": ",".join(uniq)},
+            timeout=self.timeout_s,
+        )
+        r.raise_for_status()
+
+        data_q = r.json() or {}
+        quotes = data_q.get("quotes") or {}
+
+        out: Dict[str, float] = {}
+        missing: List[str] = []
+
+        for sym in uniq:
+            q = quotes.get(sym)
+
+            if not q:
+                missing.append(sym)
+                continue
+
+            bid = _to_float(q.get("bp"), default=0.0)
+            ask = _to_float(q.get("ap"), default=0.0)
+
+            price = 0.0
+
+            if bid > 0 and ask > 0:
+                price = (bid + ask) / 2.0
+            elif bid > 0:
+                price = bid
+            elif ask > 0:
+                price = ask
+
+            if price > 0:
+                out[sym] = float(price)
+            else:
+                missing.append(sym)
+
+        # --------------------------------------------------
+        # 2) Fallback: latest TRADES for missing symbols
+        # --------------------------------------------------
+        if missing:
+            url_t = f"{self.data_base_url}/v2/stocks/trades/latest"
+            r = requests.get(
+                url_t,
+                headers=headers,
+                params={"symbols": ",".join(missing)},
+                timeout=self.timeout_s,
+            )
+            r.raise_for_status()
+
+            data_t = r.json() or {}
+            trades = data_t.get("trades") or {}
+
+            for sym in missing:
+                t = trades.get(sym)
+                if not t:
+                    continue
+
+                price = _to_float(t.get("p"), default=0.0)
+                if price > 0:
+                    out[sym] = float(price)
+
+        return out
+
+    def get_latest_trade_prices(self, symbols: List[str]) -> Dict[str, float]:
+        if not symbols:
+            return {}
+
+        uniq = list(dict.fromkeys([str(s).upper() for s in symbols]))
+        url = f"{self.data_base_url}/v2/stocks/trades/latest"
+        r = requests.get(url, headers=self._headers(), params={"symbols": ",".join(uniq)}, timeout=self.timeout_s)
+        r.raise_for_status()
+        data = r.json() or {}
+        trades = data.get("trades") or {}
+
+        out: Dict[str, float] = {}
+        for sym in uniq:
+            t = trades.get(sym)
+            if not t:
+                continue
+            p = _to_float(t.get("p"), default=0.0)
+            if p > 0:
+                out[sym] = float(p)
+        return out
+    
     def get_active_positions(self) -> Dict[str, Position]:
         """
         Returns positions keyed by symbol for easy downstream use:
