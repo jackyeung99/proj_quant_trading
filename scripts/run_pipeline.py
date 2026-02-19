@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 
-from qbt.storage.storage import LocalStorage
+from qbt.storage.storage import make_storage
 from qbt.storage.artifacts import LiveStore
 from qbt.storage.paths import StoragePaths
 from qbt.pipeline.run import run_pipeline
@@ -39,7 +39,7 @@ def main():
 
     storage_cfg = cfg["storage"]
     base_dir = Path(storage_cfg.get("base_dir", "."))
-
+    
     # --- per-run id + log path ---
     run_id = new_run_id()
     cfg["run_id"] = run_id
@@ -63,7 +63,7 @@ def main():
     cfg["sources"]["equities_intraday_15m"]["api_key"] = os.getenv("ALPACA_API_KEY")
     cfg["sources"]["equities_intraday_15m"]["api_secret"] = os.getenv("ALPACA_API_SECRET")
 
-    storage = LocalStorage(base_dir=base_dir)
+    storage = make_storage(cfg)
     paths = StoragePaths()
     artifact_store = LiveStore(storage, paths)
 

@@ -307,17 +307,27 @@ def make_storage(cfg: dict) -> Storage:
         return LocalStorage(base_dir=Path(s["base_dir"]))
 
     if backend == "s3":
-        # prefer explicit bucket/prefix in config
-        # storage:
-        #   backend: s3
-        #   bucket: my-bucket
-        #   prefix: proj_energy_volatility
+        bucket = s["bucket"]
+        prefix = s.get("prefix", "")
+        region = s.get("region")
+        profile = s.get("profile")
+        endpoint_url = s.get("endpoint_url")
+
+        logger.info(
+            "Initializing S3Storage | bucket=%s prefix=%r region=%s profile=%s endpoint=%s",
+            bucket,
+            prefix,
+            region,
+            profile,
+            endpoint_url,
+        )
+
         return S3Storage(
-            bucket=s["bucket"],
-            prefix=s.get("prefix", ""),
-            region=s.get("region"),
-            profile=s.get("profile"),           # local dev only typically
-            endpoint_url=s.get("endpoint_url"), # optional
+            bucket=bucket,
+            prefix=prefix,
+            region=region,
+            profile=profile,
+            endpoint_url=endpoint_url,
         )
 
     raise ValueError(f"Unknown storage.backend={backend!r}")

@@ -18,6 +18,16 @@ from qbt.execution.weight_math import (
 logger = get_logger(__name__)
 
 
+META_COLS = {
+    "asof_utc",
+    "generated_at_utc",
+    "config_hash",
+    "market_tz",
+    "cutoff_hour",
+}
+
+CASH_LIKE = {"CASH", "USD"}  # keep if you handle cash separately
+
 def _snapshot_portfolio(client: AlpacaTradingAPI) -> tuple[float, pd.Series, pd.Series]:
     equity = float(client.get_equity())
     pos = client.get_active_positions()
@@ -27,20 +37,47 @@ def _snapshot_portfolio(client: AlpacaTradingAPI) -> tuple[float, pd.Series, pd.
     return equity, current_shares, current_dollars
 
 
+
+def _extract_weight_assets(latest_row: pd.Series) -> list[str]:
+    """
+    Identify tradable assets from a latest weight row.
+
+    Rule:
+      - Only numeric entries are considered weights
+      - Explicitly exclude known meta cols and cash-like columns
+    """
+    assets = []
+    for k, v in latest_row.items():
+        if k in META_COLS or k in CASH_LIKE:
+            continue
+        # numeric weights only
+        if pd.api.types.is_number(v):
+            assets.append(k)
+    return assets
+
+
 def _load_target_weights(storage: LiveStore, *, strat: str, universe: str):
     weights_ts = storage.read_weights(strategy=strat, universe=universe)
-    if weights_ts.empty:
+    if weights_ts is None or weights_ts.empty:
         return None, None, None
 
-    asof = str(weights_ts.index.max())
-    target_row = latest_target_row(weights_ts)
+    # Prefer a deterministic timestamp if present; otherwise fall back to index max
+    if "asof_utc" in weights_ts.columns:
+        try:
+            asof_val = pd.to_datetime(weights_ts["asof_utc"]).max()
+            asof = str(asof_val)
+        except Exception:
+            asof = str(weights_ts.index.max())
+    else:
+        asof = str(weights_ts.index.max())
 
-    cash_like = {"CASH", "USD"}
-    target_assets = [c for c in target_row.index if c not in cash_like]
-    target_w = target_row.reindex(target_assets).fillna(0.0)
+    target_row = latest_target_row(weights_ts)  # expects a Series
+
+    # Build target weights using only valid asset columns
+    target_assets = _extract_weight_assets(target_row)
+    target_w = target_row.reindex(target_assets).astype(float).fillna(0.0)
 
     return weights_ts, asof, target_w
-
 
 def _load_prices(
     client: AlpacaTradingAPI,

@@ -27,3 +27,7 @@ signal:
 execution:
   enabled: True
   config: "steps/execution.yaml"
+
+evaluation:
+  enabled: True
+  config: "steps/evaluation.yaml" 

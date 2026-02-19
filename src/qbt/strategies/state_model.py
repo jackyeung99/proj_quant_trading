@@ -91,7 +91,7 @@ class StateSignalModel(Strategy):
             self.tau_, self.w_low_, self.w_high_ = np.nan, 0.0, 0.0
             return
 
-        if self.weight_allocation == 'mean_var':
+        if p['weight_type']== 'mean_var':
             w_low, w_high = self.estimate_weights_meanvar(
                 df,
                 state_var="S_used",

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from qbt.core.types import RunSpec, RunMeta, RunResult, BacktestSpec, ModelInputs
-from qbt.metrics.summary import compute_metrics
+from qbt.metrics.summary import compute_metrics_simple
 from qbt.backtesting.splitter import iter_walk_forward_splits
 from qbt.execution.simulator import simulate_strategy_execution
 from qbt.data.dataloader import DataAdapter, DefaultDataAdapter
@@ -133,6 +133,6 @@ class BacktestEngine:
             tag=spec.tag,
         )
 
-        metrics = compute_metrics(ts_df["port_ret_gross"])
+        metrics = compute_metrics_simple(ts_df["port_ret_gross"])
         logging.info(metrics)
         return RunResult(meta=meta, timeseries=ts_df, metrics=metrics)

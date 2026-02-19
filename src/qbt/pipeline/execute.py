@@ -168,6 +168,9 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
         # 1) Load weights + idempotency
         # --------------------------------------------------------------
         _, asof, target_w = _load_target_weights(storage, strat=strat, universe=universe)
+
+    
+
         if target_w is None or asof is None:
             logger.warning(f"No target weights found | strategy={strat} universe={universe}")
             return _ret_base(
