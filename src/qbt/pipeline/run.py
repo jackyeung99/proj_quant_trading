@@ -42,20 +42,20 @@ def run_pipeline(storage, paths, cfg, artifact_store):
 
     if cfg["signal"]["enabled"]:
         signal(
-            storage=artifact_store,
+            live_storage=artifact_store,
             # paths=paths,
             strat_cfg=cfg["signal"]['cfg'],
         )
 
     if cfg["execution"]["enabled"]:
         execute_weights(
-            artifact_store,
+            live_storage=artifact_store,
             # paths,
             execution_cfg=cfg["execution"]['cfg'],
         )
 
     if cfg["evaluation"]["enabled"]:
         evaluate_portfolio(
-            artifact_store,
+            live_storage=artifact_store,
             execution_cfg=cfg["evaluation"]['cfg'],
         )

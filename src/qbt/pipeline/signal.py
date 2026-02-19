@@ -90,7 +90,7 @@ def latest_row_df(w: pd.DataFrame) -> pd.DataFrame:
 
 
 def signal(
-    storage,  # LiveStore
+    live_storage,  # LiveStore
     strat_cfg: dict,
     *,
     data_adapter: Optional[DataAdapter] = None,
@@ -114,7 +114,8 @@ def signal(
 
     cfg_hash = config_hash(run_cfg)
 
-    data_adapter = data_adapter or DefaultDataAdapter()
+    # live store has connection to live_storage , fix later 
+    data_adapter = DefaultDataAdapter(storage=live_storage.storage)
 
     strat = create_strategy(spec.strategy_name)
     req = strat.required_features(spec)
@@ -125,8 +126,8 @@ def signal(
     )
 
     # Load existing live artifacts
-    bundle = storage.read_model(spec.strategy_name, universe)
-    meta = storage.read_model_meta(spec.strategy_name, universe) or None
+    bundle = live_storage.read_model(spec.strategy_name, universe)
+    meta = live_storage.read_model_meta(spec.strategy_name, universe) or None
 
     do_train = should_retrain(
         now_iso,
@@ -180,7 +181,7 @@ def signal(
             "strategy_meta": strat.get_meta(),
         }
 
-        storage.write_model(
+        live_storage.write_model(
             strategy=spec.strategy_name,
             universe=universe,
             bundle=bundle,
@@ -225,7 +226,7 @@ def signal(
     # -------------------------
     # WRITE WEIGHTS (latest + snapshot)
     # -------------------------
-    storage.write_weights(
+    live_storage.write_weights(
         strategy=spec.strategy_name,
         universe=universe,
         latest_w=latest_w,

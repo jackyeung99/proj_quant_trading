@@ -151,7 +151,7 @@ def _prep_equity(df: pd.DataFrame) -> pd.DataFrame:
 
     return x[["portfolio_value"]]
 
-def evaluate_portfolio(storage: LiveStore, execution_cfg: dict) -> dict:
+def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
     client = AlpacaTradingAPI(cfg=execution_cfg.get("alpaca", {}) or {})
     logger.debug("Alpaca client initialized")
 
@@ -183,13 +183,13 @@ def evaluate_portfolio(storage: LiveStore, execution_cfg: dict) -> dict:
     # ------------------------------------------------------------
     # 2) Weights snapshots
     # ------------------------------------------------------------
-    weights_raw = storage.read_all_weights(strategy=strategy, universe=universe)
+    weights_raw = live_storage.read_all_weights(strategy=strategy, universe=universe)
     weights_wide, asset_cols = _prep_weights_wide(weights_raw)
 
     # ------------------------------------------------------------
     # 3) Gold daily features
     # ------------------------------------------------------------
-    gold = storage.storage.read_parquet(gold_path)
+    gold = live_storage.storage.read_parquet(gold_path)
 
     gold_wide = _prep_gold(
         gold,
@@ -199,7 +199,7 @@ def evaluate_portfolio(storage: LiveStore, execution_cfg: dict) -> dict:
     # ------------------------------------------------------------
     # 4) Model meta snapshots
     # ------------------------------------------------------------
-    meta_raw = storage.read_all_model_meta(strategy=strategy, universe=universe)
+    meta_raw = live_storage.read_all_model_meta(strategy=strategy, universe=universe)
     meta_sd = _prep_meta(meta_raw)
 
     # ------------------------------------------------------------
@@ -264,7 +264,7 @@ def evaluate_portfolio(storage: LiveStore, execution_cfg: dict) -> dict:
     # 8) Persist
     # ------------------------------------------------------------
 
-    storage.write_portfolio_performance(
+    live_storage.write_portfolio_performance(
         strategy=strategy,
         universe=universe,
         df=merged,

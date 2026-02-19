@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import pandas as pd
 
 from qbt.core.types import ModelInputs, RunSpec
+from qbt.storage.storage import Storage
 
 
 class DataAdapter:
@@ -26,36 +27,29 @@ class DefaultDataAdapter(DataAdapter):
     load()   -> returns the LONG modeling table (DataFrame)
     prepare() -> returns ModelInputs with wide ret + wide features
     """
+    def __init__(self, storage: Storage):
+        self.storage = storage
 
     def load(self, spec: RunSpec) -> pd.DataFrame:
         data_path = spec.data_path
-
         if not data_path:
-            raise ValueError("spec.data must include 'data_path' pointing to the modeling table parquet/csv.")
+            raise ValueError("spec.data_path must point to modeling table (key for S3, or local path).")
 
-        path = Path(data_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Modeling table not found at: {path}")
+        # If your pipeline uses Storage, treat data_path as a storage key (relative)
+        key = str(data_path).lstrip("/")
 
+        # Use storage exists/read (works for local and s3 backends)
+        if not self.storage.exists(key):
+            raise FileNotFoundError(f"Modeling table not found in storage at key: {key}")
 
-        # infer from suffix
-        if path.suffix.lower() in [".parquet"]:
-            fmt = "parquet"
-        elif path.suffix.lower() in [".csv"]:
-            fmt = "csv"
-        else:
-            raise ValueError(f"Could not infer file format from suffix: {path.suffix}")
+        # infer format from suffix
+        suffix = Path(key).suffix.lower()
+        if suffix == ".parquet":
+            return self.storage.read_parquet(key)
+        if suffix == ".csv":
+            return self.storage.read_csv(key)  # implement if you need it
 
-        # minimal read
-        if fmt == "parquet":
-            df = pd.read_parquet(path)
-        elif fmt == "csv":
-            df = pd.read_csv(path)
-        else:
-            raise ValueError(f"Unsupported file_format={fmt!r}. Use 'parquet' or 'csv'.")
-
-
-        return df
+        raise ValueError(f"Could not infer file format from suffix: {suffix}")
 
     def prepare(
         self,

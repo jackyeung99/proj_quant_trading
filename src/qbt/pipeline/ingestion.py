@@ -54,7 +54,7 @@ def ingest_one_source(storage: Storage, paths: StoragePaths, ingestion_cfg: dict
         store_key = paths.bronze_bars_key(freq=freq, ticker=ticker)
         state_key = paths.bronze_bars_state_key(freq=freq, ticker=ticker)
 
-
+        logging.debug("store_key=%s state_key=%s", store_key, state_key)
 
         last_date = get_last_available_date(storage, state_key)
 

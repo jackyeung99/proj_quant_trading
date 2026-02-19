@@ -87,7 +87,7 @@ def _read_knobs(execution_cfg: dict) -> dict:
 
 
 
-def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
+def execute_weights(live_storage: LiveStore, execution_cfg: dict) -> dict:
     k = _read_knobs(execution_cfg)  # keep knobs grouped
 
     strat = k["strat_name"]
@@ -101,7 +101,7 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
     )
 
     lock = _acquire_lock(
-        storage,
+        live_storage,
         strat=strat,
         universe=universe,
         enabled=k["lock_enabled"],
@@ -167,7 +167,7 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
         # --------------------------------------------------------------
         # 1) Load weights + idempotency
         # --------------------------------------------------------------
-        _, asof, target_w = _load_target_weights(storage, strat=strat, universe=universe)
+        _, asof, target_w = _load_target_weights(live_storage, strat=strat, universe=universe)
 
     
 
@@ -182,8 +182,8 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
                 holding_period=hp_result,
             )
 
-        if (not k["allow_replay_same_asof"]) and storage.already_executed_asof(strategy=strat, universe=universe, asof=asof):
-            last_exec = storage.read_last_exec(strategy=strat, universe=universe)
+        if (not k["allow_replay_same_asof"]) and live_storage.already_executed_asof(strategy=strat, universe=universe, asof=asof):
+            last_exec = live_storage.read_last_exec(strategy=strat, universe=universe)
             logger.warning(f"Skip (already executed asof) | asof={asof} last_exec={last_exec}")
             return _ret_base(
                 strat=strat,
@@ -246,7 +246,7 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
         # 4) Persist planned orders
         # --------------------------------------------------------------
         batch_id, orders_key, orders_df = _write_planned_orders(
-            storage,
+            live_storage,
             strat=strat,
             universe=universe,
             plan=plan,
@@ -284,7 +284,7 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
         # # --------------------------------------------------------------
         skip = _skip_if_open_orders_exist(
             client,
-            storage,
+            live_storage,
             strat=strat,
             universe=universe,
             asof=asof,
@@ -311,7 +311,7 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
         # --------------------------------------------------------------
         # 7) Mark submitted + submit orders
         # --------------------------------------------------------------
-        storage.write_last_exec(
+        live_storage.write_last_exec(
             strategy=strat,
             universe=universe,
             meta={
@@ -350,7 +350,7 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
         # 9) Save trades + mark completed
         # --------------------------------------------------------------
         trades_df = orders_df.copy()
-        trades_key = storage.write_trades_batch(
+        trades_key = live_storage.write_trades_batch(
             strategy=strat,
             universe=universe,
             trades=trades_df,
@@ -358,7 +358,7 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
         )
         logger.info(f"Saved trades parquet | batch_id={batch_id} key={trades_key}")
 
-        storage.write_last_exec(
+        live_storage.write_last_exec(
             strategy=strat,
             universe=universe,
             meta={
@@ -394,6 +394,6 @@ def execute_weights(storage: LiveStore, execution_cfg: dict) -> dict:
 
     finally:
         try:
-            _release_lock(storage, strat=strat, universe=universe, enabled=k["lock_enabled"], dry_run=dry_run)
+            _release_lock(live_storage, strat=strat, universe=universe, enabled=k["lock_enabled"], dry_run=dry_run)
         except Exception as e:
             logger.warning(f"Failed to clear lock | err={e!r}")

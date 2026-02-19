@@ -14,6 +14,7 @@ logger = get_logger(__name__)
 
 import s3fs
 import pandas as pd
+import pyarrow.parquet as pq
 
 
 class Storage:
@@ -178,7 +179,12 @@ class S3Storage(Storage):
 
     def exists(self, key: str) -> bool:
         self._init_fs()
-        return self._fs.exists(self._uri(key))
+        p = f"{self.bucket}/{self._key(key)}"   # NO s3://
+        try:
+            info = self._fs.info(p)             # raises if missing
+            return info.get("type") == "file"
+        except FileNotFoundError:
+            return False
     
 
     def list(self, prefix: str) -> list[str]:
@@ -210,33 +216,32 @@ class S3Storage(Storage):
             out.append(k)
 
         return sorted(out)
-
+    
     def read_parquet(self, key: str) -> pd.DataFrame:
         # pandas will use s3fs via fsspec if installed
-        return pd.read_parquet(self._uri(key))
+        return pd.read_parquet(
+                self._uri(key),
+                engine="pyarrow",
+                filesystem=self._fs,
+                partitioning=None,   # <-- disables hive inference
+            )
 
     def write_parquet(self, df: pd.DataFrame, key: str) -> None:
         self._init_fs()
-        final_uri = self._uri(key)
-
-        # temp key alongside final
         tmp_key = f"{self._key(key)}.__tmp__{uuid.uuid4().hex}"
         tmp_uri = f"s3://{self.bucket}/{tmp_key}"
 
-        # write temp
-        df.to_parquet(tmp_uri, index=True)
+        df.to_parquet(tmp_uri, index=True, engine="pyarrow", filesystem=self._fs)
 
-        # copy temp -> final (overwrite)
-        # s3fs expects "bucket/key" without s3:// for some ops
         src = f"{self.bucket}/{tmp_key}"
         dst = f"{self.bucket}/{self._key(key)}"
         self._fs.copy(src, dst)
 
-        # cleanup temp
         try:
             self._fs.rm(src)
         except Exception:
             pass
+
 
     def read_json(self, key: str) -> Any:
         self._init_fs()

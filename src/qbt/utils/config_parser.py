@@ -28,7 +28,7 @@ def deep_merge(a: dict, b: dict) -> dict:
             out[k] = deepcopy(v)
     return out
 
-def load_controlled_cfg(entry_path: str = "config/data.yaml") -> dict:
+def load_controlled_cfg(entry_path: str = "configs/data.yaml") -> dict:
     entry = Path(entry_path).resolve()
     root = yaml.safe_load(entry.read_text()) or {}
 

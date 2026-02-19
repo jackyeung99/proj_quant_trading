@@ -155,7 +155,7 @@ class AlpacaBarsSource(DataSource):
                 keep.append("trades")
 
             df = df[keep]
-            print(df.columns)
+        
             out = (
                 df.dropna(subset=["timestamp"])
                 .sort_values(["timestamp"])
@@ -181,7 +181,8 @@ class AlpacaBarsSource(DataSource):
                 df[c] = pd.NA
 
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
-        df["ticker"] = df["ticker"].astype(str)
+        df["ticker"] = df["ticker"].astype("string")
+        
 
         # enforce numeric
         for c in ["open", "high", "low", "close", "volume"]:

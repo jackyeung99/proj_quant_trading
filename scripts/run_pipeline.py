@@ -36,28 +36,38 @@ def main():
     args = parse_args()
 
     cfg = load_controlled_cfg(Path(args.cfg))
-
-    storage_cfg = cfg["storage"]
-    base_dir = Path(storage_cfg.get("base_dir", "."))
     
     # --- per-run id + log path ---
     run_id = new_run_id()
     cfg["run_id"] = run_id
+    storage_cfg = cfg["storage"]
+    backend = storage_cfg.get("backend", "local")
 
-    log_path = (
-        base_dir
-        / "artifacts"
-        / "runs"
-        / f"run_id={run_id}"
-        / "logs"
-        / "app.log"
-    )
 
-    setup_logging(
-        level=logging.INFO,
-        log_file=log_path,
-        force=True,
-    )
+    if backend == "local":
+        base_dir = Path(storage_cfg.get("base_dir", "."))
+        log_path = (
+            base_dir
+            / "artifacts"
+            / "runs"
+            / f"run_id={run_id}"
+            / "logs"
+            / "app.log"
+        )
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        setup_logging(
+            level=logging.INFO,
+            log_file=log_path,
+            force=True,
+        )
+    else:
+        # Cloud / ECS → log to stdout only
+        setup_logging(
+            level=logging.INFO,
+            log_file=None,
+            force=True,
+        )
 
     # inject api keys
     cfg["sources"]["equities_intraday_15m"]["api_key"] = os.getenv("ALPACA_API_KEY")

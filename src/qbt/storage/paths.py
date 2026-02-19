@@ -58,7 +58,7 @@ class StoragePaths:
     # ---------------------------------------------------------------------
     # ----- bronze keys -----
     def bronze_bars_dir(self, *, freq: str, ticker: str) -> str:
-        return _p(self.bronze, f"freq={_clean(freq)}", f"ticker={_clean(ticker)}")
+        return _p(self.bronze, f"freq={_clean(freq)}", f"symbol={_clean(ticker)}")
 
     def bronze_bars_key(self, *, freq: str, ticker: str) -> str:
         return _p(self.bronze_bars_dir(freq=freq, ticker=ticker), "bars.parquet")
