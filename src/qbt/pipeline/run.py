@@ -11,6 +11,7 @@ from qbt.pipeline.silver import canonicalize_all
 from qbt.pipeline.gold import build_gold_model_table
 from qbt.pipeline.execute import execute_weights
 from qbt.pipeline.signal import signal
+from qbt.pipeline.evaluation import evaluate_portfolio
 
 import pprint
 
@@ -53,3 +54,8 @@ def run_pipeline(storage, paths, cfg, artifact_store):
             execution_cfg=cfg["execution"]['cfg'],
         )
 
+    if cfg["evaluation"]["enabled"]:
+        evaluate_portfolio(
+            artifact_store,
+            execution_cfg=cfg["evaluation"]['cfg'],
+        )

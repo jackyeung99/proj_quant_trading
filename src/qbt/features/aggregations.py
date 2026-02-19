@@ -19,6 +19,7 @@ def resample_ohlcv(
     tz: str | None = "America/New_York",
     session_start: str = "09:30",
     session_end: str = "16:00",
+    assume_naive_tz: str = "UTC",   # <-- make assumption explicit
     open_col: str = "open",
     high_col: str = "high",
     low_col: str = "low",
@@ -30,10 +31,10 @@ def resample_ohlcv(
         raise ValueError("df must be indexed by a DatetimeIndex.")
     x = x.sort_index()
 
-    tz = tz or "America/New_York"  
+    tz = tz or "America/New_York"
 
     if x.index.tz is None:
-        x.index = x.index.tz_localize("UTC").tz_convert(tz)
+        x.index = x.index.tz_localize(assume_naive_tz).tz_convert(tz)
     else:
         x.index = x.index.tz_convert(tz)
 
@@ -52,7 +53,6 @@ def resample_ohlcv(
     out = x.resample(rv_freq).agg(agg_map)
     out = out.dropna(subset=[open_col, high_col, low_col, close_col], how="all")
     return out
-
 
 
 
@@ -77,35 +77,27 @@ def bucket_daily_with_cutoff_no_roll(
     *,
     cutoff_hour: float,
 ) -> tuple[pd.DatetimeIndex, pd.Series]:
-    """
-    Return (labels, mask) where:
-      - labels: calendar-day label for each timestamp (idx.normalize())
-      - mask: boolean Series indicating rows to KEEP (time-of-day <= cutoff)
-    """
     if not isinstance(idx, pd.DatetimeIndex):
         raise TypeError("idx must be a DatetimeIndex")
 
     cutoff = _parse_cutoff(cutoff_hour)
 
-    # time since midnight (TimedeltaIndex)
+    # time since midnight (works for tz-aware too)
     tod = idx - idx.normalize()
-
-    # keep rows at or before cutoff
     mask = tod <= cutoff
 
+    # merge-safe labels: midnight local, but tz removed
     labels = idx.normalize()
-    # keep index/labels aligned and preserve tz if present
-    if idx.tz is not None and labels.tz is None:
-        labels = labels.tz_localize(idx.tz)
+    if labels.tz is not None:
+        labels = labels.tz_localize(None)
 
     return labels, pd.Series(mask, index=idx)
-
 
 
 def aggregate_intraday_to_daily_features(
     df: pd.DataFrame,
     *,
-    intra_freq = '5 Min',
+    intra_freq = '5min',
     cutoff_hour: float = 16.0,
     tz: str | None = "America/New_York",
     features: Iterable[Mapping[str, Any]],
@@ -151,7 +143,7 @@ def aggregate_intraday_to_daily_features(
 
     # ======================
 
-
+ 
 
 
     # build features

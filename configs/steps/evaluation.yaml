@@ -1,0 +1,15 @@
+
+strategy_name: StateSignal
+universe: XLE
+
+portfolio:
+  source: alpaca
+  # period: 1Y
+  timeframe: 1D
+
+gold_path: data/gold/freq=1D/tag=model_ready/table.parquet
+benchmark: XLE        # for buy & hold comparison
+
+publish:
+  bucket: YOUR_BUCKET
+  key: public/perf/state_signal_xle.json

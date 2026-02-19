@@ -21,6 +21,14 @@ class Storage:
 
         logger.debug(f"checking file path: {key}")
         raise NotImplementedError
+    
+    def list(self, prefix: str) -> list[str]:
+        """
+        List keys under a prefix (non-recursive or recursive depending on backend).
+
+        Returns keys relative to storage root (same format used in read/write).
+        """
+        raise NotImplementedError
 
     def read_parquet(self, key: str) -> pd.DataFrame:
         logger.debug(f"reading file: {key}")
@@ -58,6 +66,25 @@ class LocalStorage(Storage):
 
     def exists(self, key: str) -> bool:
         return self._path(key).exists()
+    
+    def list(self, prefix: str) -> list[str]:
+        base = self.base_dir.resolve()
+        path = (base / prefix).resolve()
+
+        if not path.exists():
+            return []
+
+        if path.is_file():
+            return [prefix]
+
+        out = []
+        for p in path.rglob("*"):
+            if p.is_file():
+                # make both absolute → safe
+                rel = p.resolve().relative_to(base)
+                out.append(str(rel).replace("\\", "/"))
+
+        return sorted(out)
 
     # =====================
     # Parquet
@@ -152,6 +179,37 @@ class S3Storage(Storage):
     def exists(self, key: str) -> bool:
         self._init_fs()
         return self._fs.exists(self._uri(key))
+    
+
+    def list(self, prefix: str) -> list[str]:
+        self._init_fs()
+
+        key_prefix = self._key(prefix)
+        uri = f"s3://{self.bucket}/{key_prefix}"
+
+        try:
+            paths = self._fs.ls(uri, detail=False)
+        except FileNotFoundError:
+            return []
+
+        out = []
+        for p in paths:
+            # p format: bucket/prefix/... or s3://bucket/...
+            if p.startswith(f"{self.bucket}/"):
+                k = p[len(self.bucket) + 1 :]
+            elif p.startswith("s3://"):
+                k = p.split("/", 3)[-1]
+            else:
+                k = p
+
+            # remove configured prefix so key matches read/write API
+            pref = self.prefix.strip("/")
+            if pref and k.startswith(pref + "/"):
+                k = k[len(pref) + 1 :]
+
+            out.append(k)
+
+        return sorted(out)
 
     def read_parquet(self, key: str) -> pd.DataFrame:
         # pandas will use s3fs via fsspec if installed

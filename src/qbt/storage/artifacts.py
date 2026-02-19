@@ -110,12 +110,81 @@ class LiveStore:
     # Models
     # ---------------------------------------------------------------------
     def read_model(self, strategy: str, universe: str) -> Optional[ModelBundle]:
-        key = self.paths.model_key(strategy=strategy, universe=universe, tag="latest")
+        key = self.paths.model_latest_pkl_key(strategy=strategy, universe=universe)
         return self.storage.read_pickle(key) if self.storage.exists(key) else None
 
     def read_model_meta(self, strategy: str, universe: str) -> Dict[str, Any]:
-        key = self.paths.model_meta_key(strategy=strategy, universe=universe, tag="latest")
+        key = self.paths.model_latest_meta_key(strategy=strategy, universe=universe)
         return self.storage.read_json(key) if self.storage.exists(key) else {}
+    
+
+    def read_all_model_meta(self, strategy: str, universe: str) -> pd.DataFrame:
+        """
+        Read all model meta snapshots for (strategy, universe) and return a time-series DF.
+
+        Expects snapshot layout:
+        live/models/strategy=.../universe=.../snapshots/asof=.../meta.json
+
+        Returns:
+        DataFrame indexed by trained_at (UTC), columns include strategy_meta fields.
+        """
+        prefix = self.paths.model_snapshot_prefix(strategy, universe)
+        keys = self.storage.list(prefix)
+
+        if not keys:
+            return pd.DataFrame()
+
+        # keep only meta.json files inside snapshots
+        meta_keys = [k for k in keys if str(k).endswith("/meta.json") or str(k).endswith("meta.json")]
+        if not meta_keys:
+            return pd.DataFrame()
+        
+
+        rows = []
+
+        for k in meta_keys:
+            try:
+                meta = self.storage.read_json(k)
+            except Exception:
+                continue
+
+            if not meta:
+                continue
+
+            trained_at = meta.get("trained_at")
+            if not trained_at:
+                # fallback: parse from folder name if present
+                # e.g. ".../asof=2026-02-18T20-56-11Z/meta.json"
+                trained_at = None
+
+            strat_meta = meta.get("strategy_meta", {}) or {}
+
+            row = {
+                "trained_at": trained_at,
+                "train_end": meta.get("train_end"),
+                "train_end_session_date": meta.get("train_end_session_date"),
+                "config_hash": meta.get("config_hash"),
+                "retrain_freq": meta.get("retrain_freq"),
+                "train_lookback_bars": meta.get("train_lookback_bars"),
+                "min_train_bars": meta.get("min_train_bars"),
+                "bundle_version": meta.get("bundle_version"),
+                **strat_meta,  # tau_star, w_low, w_high, state_var, etc.
+            }
+            rows.append(row)
+
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(rows)
+
+        # drop rows missing trained_at
+        df["session_date"] = pd.to_datetime(df["train_end_session_date"], utc=True, errors="coerce")
+        df = df.dropna(subset=["session_date"]).set_index("session_date").sort_index()
+
+        # if duplicates, keep last
+        df = df[~df.index.duplicated(keep="last")]
+
+        return df
 
     def write_model(
         self,
@@ -124,18 +193,47 @@ class LiveStore:
         universe: str,
         bundle: ModelBundle,
         meta: Dict[str, Any],
+        params: Dict[str, Any] | None = None,
         snapshot: bool = True,
     ) -> None:
-        # latest
-        self.storage.write_pickle(bundle, self.paths.model_key(strategy=strategy, universe=universe, tag="latest"))
-        self.storage.write_json(meta, self.paths.model_meta_key(strategy=strategy, universe=universe, tag="latest"))
 
-        # snapshot by trained_at (optional)
+        # -------------------------
+        # LATEST (fast live access)
+        # -------------------------
+        self.storage.write_pickle(
+            bundle,
+            self.paths.model_latest_pkl_key(strategy=strategy, universe=universe ),
+        )
+
+        self.storage.write_json(
+            meta,
+            self.paths.model_latest_meta_key(strategy=strategy, universe=universe),
+        )
+
+        # -------------------------
+        # SNAPSHOT (versioned)
+        # -------------------------
         if snapshot:
-            tag = str(meta.get("trained_at", "unknown"))
-            self.storage.write_pickle(bundle, self.paths.model_key(strategy=strategy, universe=universe, tag=tag))
-            self.storage.write_json(meta, self.paths.model_meta_key(strategy=strategy, universe=universe, tag=tag))
+            trained_at  = str(meta.get("trained_at", "unknown"))
 
+            # model snapshot
+            self.storage.write_pickle(
+                bundle,
+                self.paths.model_snapshot_pkl_key(strategy=strategy, universe=universe, trained_at=trained_at),
+            )
+
+            # meta snapshot
+            self.storage.write_json(
+                meta,
+                self.paths.model_snapshot_meta_key(strategy=strategy, universe=universe, trained_at=trained_at),
+            )
+
+            # params snapshot (ONLY HERE)
+            if params is not None:
+                self.storage.write_json(
+                    params,
+                    self.paths.model_snapshot_params_key(strategy=strategy, universe=universe, trained_at=trained_at),
+                )
     # ---------------------------------------------------------------------
     # Weights (signal output): latest + snapshot(asof)
     # ---------------------------------------------------------------------
@@ -181,6 +279,56 @@ class LiveStore:
         """
         key = self.paths.weights_snapshot_key(strategy, universe, asof=asof)
         return self.storage.read_parquet(key) if self.storage.exists(key) else pd.DataFrame()
+    
+
+    def read_all_weights(self, strategy: str, universe: str) -> pd.DataFrame:
+        """
+        Read all weight snapshots for (strategy, universe) and return a
+        time-series DataFrame sorted by asof.
+
+        Returns:
+            DataFrame indexed by asof (datetime-like), columns = tickers
+        """
+
+        prefix = self.paths.weights_snapshots_prefix(strategy, universe)
+
+        # list snapshot files (implementation depends on your storage backend)
+        keys = self.storage.list(prefix)
+
+        if not keys:
+            return pd.DataFrame()
+
+        parts = []
+
+        for k in keys:
+            try:
+                df = self.storage.read_parquet(k)
+                if not df.empty:
+                    parts.append(df)
+            except Exception:
+                continue
+
+        if not parts:
+            return pd.DataFrame()
+
+        out = pd.concat(parts)
+
+        # ensure index name
+        out.index.name = out.index.name or "asof"
+
+        # convert to datetime if possible
+        try:
+            out.index = pd.to_datetime(out.index, utc=True)
+        except Exception:
+            pass
+
+        out = (
+            out
+            .sort_index()
+            .drop_duplicates(keep="last")
+        )
+
+        return out
 
     # ---------------------------------------------------------------------
     # Execution guards: lock + last_exec
@@ -288,3 +436,74 @@ class LiveStore:
         root = self.paths.trades_root(strategy, universe)
         key = f"{root}/date={date}" if date else root
         return self.storage.read_parquet(key) if self.storage.exists(key) else pd.DataFrame()
+    
+
+    def write_portfolio_performance(
+        self,
+        *,
+        strategy: str,
+        universe: str,
+        df: pd.DataFrame,
+        metrics: dict,
+    ) -> None:
+        if df is None or df.empty:
+            return
+
+        now_utc = pd.Timestamp.now(tz="UTC")
+        now_iso = now_utc.isoformat()
+
+        # -----------------------------
+        # 1) Time series parquet (latest)
+        # -----------------------------
+        ts_key = self.paths.performance_ts(strategy=strategy, universe=universe)
+
+        x = df.sort_index()
+        self.storage.write_parquet(x, ts_key)
+
+        # -----------------------------
+        # 2) Metrics json (latest)
+        # -----------------------------
+        metrics_key = self.paths.performance_metrics(strategy=strategy, universe=universe)
+
+        metrics_out = dict(metrics or {})
+        metrics_out["generated_at_utc"] = now_iso
+        metrics_out["strategy"] = strategy
+        metrics_out["universe"] = universe
+        metrics_out["rows"] = int(len(x))
+
+        # helpful bounds for debugging
+        if isinstance(x.index, pd.DatetimeIndex) and len(x.index) > 0:
+            metrics_out["start_session_date"] = x.index.min().isoformat()
+            metrics_out["end_session_date"] = x.index.max().isoformat()
+
+        self.storage.write_json(metrics_out, metrics_key)
+
+        # -----------------------------
+        # 3) Meta json (latest) - richer info
+        # -----------------------------
+        meta_key = self.paths.performance_ts_meta(strategy=strategy, universe=universe)
+
+        meta_out = {
+            "generated_at_utc": now_iso,
+            "strategy": strategy,
+            "universe": universe,
+            "ts_key": ts_key,
+            "metrics_key": metrics_key,
+            "shape": {"rows": int(x.shape[0]), "cols": int(x.shape[1])},
+            "columns": list(map(str, x.columns)),
+        }
+
+        # index diagnostics
+        if isinstance(x.index, pd.DatetimeIndex):
+            meta_out["index"] = {
+                "name": x.index.name,
+                "tz": str(x.index.tz) if x.index.tz is not None else None,
+                "dtype": str(x.index.dtype),
+                "min": x.index.min().isoformat() if len(x.index) else None,
+                "max": x.index.max().isoformat() if len(x.index) else None,
+            }
+        else:
+            meta_out["index"] = {"name": getattr(x.index, "name", None), "dtype": str(x.index.dtype)}
+
+        self.storage.write_json(meta_out, meta_key)
+

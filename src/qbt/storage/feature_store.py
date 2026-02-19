@@ -33,19 +33,19 @@ def write_gold_long_with_manifest(
         return {"written": False, "reason": "empty_df"}
 
     # --- validate + normalize ---
-    required = {"timestamp", "ticker"}
+    required = {"session_date", "ticker"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"gold df missing required columns: {sorted(missing)}")
 
     out = df.copy()
-    out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+    out["session_date"] = pd.to_datetime(out["session_date"], utc=True, errors="coerce")
     out["ticker"] = out["ticker"].astype("string")
 
-    out = out.dropna(subset=["timestamp", "ticker"]).sort_values(["ticker", "timestamp"]).reset_index(drop=True)
+    out = out.dropna(subset=["session_date", "ticker"]).sort_values(["ticker", "session_date"]).reset_index(drop=True)
 
     # --- feature columns ---
-    feature_cols = [c for c in out.columns if c not in ("timestamp", "ticker")]
+    feature_cols = [c for c in out.columns if c not in ("session_date", "ticker")]
 
     # --- cfg snapshot + hash (what produced this dataset) ---
     cfg_snapshot = {
@@ -63,8 +63,8 @@ def write_gold_long_with_manifest(
 
     # --- compute dataset stats ---
     tickers = sorted(out["ticker"].dropna().unique().tolist())
-    dt_min = out["timestamp"].min()
-    dt_max = out["timestamp"].max()
+    dt_min = out["session_date"].min()
+    dt_max = out["session_date"].max()
 
     # per-feature dtype summary
     cols_meta = [{"name": str(c), "dtype": str(out[c].dtype)} for c in out.columns]

@@ -67,6 +67,65 @@ class AlpacaTradingAPI:
             raise RuntimeError("Missing Alpaca credentials (api_key/api_secret or env vars)")
         
 
+
+    def get_historical_equity(
+        self,
+        *,
+        period: str = "1Y",
+        timeframe: str = "1D",
+        extended_hours: bool = True,
+        as_df: bool = True,
+        tz: str = "UTC",
+        date_start: str | None = None,   # "YYYY-MM-DD"
+        date_end: str | None = None,     # "YYYY-MM-DD"
+    ):
+        url = self.base_url.rstrip("/") + "/account/portfolio/history"
+        headers = self._headers()
+
+        params = {
+            "period": period,
+            "timeframe": timeframe,
+            "extended_hours": str(bool(extended_hours)).lower(),
+        }
+        if date_start:
+            params["date_start"] = str(pd.Timestamp(date_start).date())
+        if date_end:
+            params["date_end"] = str(pd.Timestamp(date_end).date())
+
+            r = requests.get(url, headers=headers, params=params, timeout=self.timeout_s)
+            if r.status_code != 200:
+                raise RuntimeError(f"Alpaca error {r.status_code}: {r.text[:300]}")
+
+            js = r.json() or {}
+
+        if not as_df:
+            return js
+
+        ts = js.get("timestamp") or []
+        eq = js.get("equity") or []
+        pl = js.get("profit_loss") or []
+        plp = js.get("profit_loss_pct") or []
+
+        df = pd.DataFrame({
+            "timestamp": pd.to_datetime(ts, unit="s", utc=True),
+            "equity": pd.to_numeric(eq, errors="coerce"),
+            "profit_loss": pd.to_numeric(pl, errors="coerce"),
+            "profit_loss_pct": pd.to_numeric(plp, errors="coerce"),
+        }).dropna(subset=["timestamp", "equity"]).sort_values("timestamp")
+
+        df["period"] = period
+        df["timeframe"] = timeframe
+        df["extended_hours"] = bool(extended_hours)
+
+        
+        if tz and tz.upper() != "UTC":
+            df["timestamp"] = df["timestamp"].dt.tz_convert(tz)
+
+        if "base_value" in js:
+            df["base_value"] = _to_float(js.get("base_value"))
+
+        return df
+    
     def get_equity(self) -> float:
         url = self.base_url + "account"
         headers = self._headers()

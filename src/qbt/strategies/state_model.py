@@ -42,6 +42,15 @@ class StateSignalModel(Strategy):
             "w_max": float(params.get("w_high", 3.0)),
             "eps": float(params.get("eps", 1e-12)),
         }
+    
+    def get_meta(self) -> dict:
+        return {
+            "tau_star": self.tau_,
+            "w_low": self.w_low_,
+            "w_high": self.w_high_,
+            "state_var": self.state_var_,
+            "weight_allocation": self.weight_allocation,
+        }
 
     def required_features(self, spec: RunSpec) -> list[str]:
         """

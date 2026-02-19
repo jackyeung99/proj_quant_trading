@@ -45,11 +45,13 @@ class StoragePaths:
 
     # artifacts
     artifacts: str = "artifacts"
-    models_dir: str = "artifacts/models"
     live_dir: str = "artifacts/live"              # weights + signals
-    execution_dir: str = "artifacts/execution"    # locks + last_exec
-    orders_dir: str = "artifacts/orders"          # planned orders (optional but useful)
-    trades_dir: str = "artifacts/trades"          # executed trade ledger
+    models_dir: str = "artifacts/live/models"
+    weights_dir: str = "artifacts/live/weights"
+    performance_dir: str = "artifacts/live/performance"
+    execution_dir: str = "artifacts/live/execution"    # locks + last_exec
+    orders_dir: str = "artifacts/live/orders"          # planned orders (optional but useful)
+    trades_dir: str = "artifacts/live/trades"          # executed trade ledger
 
     # ---------------------------------------------------------------------
     # Data construction pipeline
@@ -105,18 +107,40 @@ class StoragePaths:
     # Live artifacts: models + weights + execution guards + orders + trades
     # ---------------------------------------------------------------------
     # ----- models -----
-    def model_key(self, strategy: str, universe: str = "default", tag: str = "latest") -> str:
-        return _p(self.models_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", f"tag={_clean(tag)}", "model.pkl")
+    def model_latest_prefix(self, strategy: str, universe: str) -> str:
+        return f"{self.models_dir}/strategy={strategy}/universe={universe}/latest"
 
-    def model_meta_key(self, strategy: str, universe: str = "default", tag: str = "latest") -> str:
-        return _p(self.models_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", f"tag={_clean(tag)}", "meta.json")
+    def model_snapshot_prefix(self, strategy: str, universe: str) -> str:
+        return f"{self.models_dir}/strategy={strategy}/universe={universe}/snapshots"
+    
+
+    def model_latest_pkl_key(self, strategy, universe):
+        return f"{self.model_latest_prefix(strategy, universe)}/model.pkl"
+
+    def model_latest_meta_key(self, strategy, universe):
+        return f"{self.model_latest_prefix(strategy, universe)}/meta.json"
+
+    def model_latest_params_key(self, strategy, universe):
+        return f"{self.model_latest_prefix(strategy, universe)}/params.json"
+
+    def model_snapshot_pkl_key(self, strategy, universe, trained_at):
+        return f"{self.model_snapshot_prefix(strategy, universe)}/asof={_clean(trained_at)}/model.pkl"
+
+    def model_snapshot_meta_key(self, strategy, universe, trained_at):
+        return f"{self.model_snapshot_prefix(strategy, universe)}/asof={_clean(trained_at)}/meta.json"
+
+    def model_snapshot_params_key(self, strategy, universe, trained_at):
+        return f"{self.model_snapshot_prefix(strategy, universe)}/asof={_clean(trained_at)}/params.json"
 
     # ----- weights (signal output) -----
     def weights_latest_key(self, strategy: str, universe: str) -> str:
-        return _p(self.live_dir, "weights", f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "latest.parquet")
+        return _p(self.weights_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "latest.parquet")
 
     def weights_snapshot_key(self, strategy: str, universe: str, asof: str) -> str:
-        return _p(self.live_dir, "weights", f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "snapshots", f"asof={_clean(asof)}.parquet")
+        return _p(self.weights_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "snapshots", f"asof={_clean(asof)}.parquet")
+    
+    def weights_snapshots_prefix(self, strategy: str, universe: str):
+         return _p(self.weights_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "snapshots")
 
     # ----- execution guards -----
     def exec_lock_key(self, strategy: str, universe: str) -> str:
@@ -138,3 +162,18 @@ class StoragePaths:
 
     def trades_batch_key(self, strategy: str, universe: str, date: str, batch_id: str) -> str:
         return _p(self.trades_root(strategy, universe), f"date={_clean(date)}", f"{_clean(batch_id)}.parquet")
+
+
+
+    # ----- performance  -----
+
+    def performance_ts(self, strategy, universe ) -> str:
+        return _p(self.performance_dir,  f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "portfolio_timeseries.parquet")
+    
+
+    def performance_metrics(self, strategy, universe ) -> str:
+        return _p(self.performance_dir,  f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "portfolio_metrics.json")
+    
+    def performance_ts_meta(self, strategy, universe ) -> str:
+        return _p(self.performance_dir,  f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "meta.json")
+    

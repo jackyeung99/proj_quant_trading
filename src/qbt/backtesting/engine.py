@@ -115,6 +115,7 @@ class BacktestEngine:
             w,
             weight_lag=bt.weight_lag,
             transaction_cost_bps=bt.transaction_cost_bps,
+            return_type='log'
             # rebalance=bt.rebalance,
         )
 

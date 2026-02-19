@@ -3,7 +3,7 @@
   "assets": [
     "XLE"
   ],
-  "created_at_utc": "2026-02-17T20:30:50.287193+00:00",
+  "created_at_utc": "2026-02-19T02:51:08.061355+00:00",
   "dataset": "gold_long_table",
   "freq": "1D",
   "paths": {
@@ -14,7 +14,7 @@
     "columns": [
       {
         "dtype": "datetime64[ns, UTC]",
-        "name": "timestamp"
+        "name": "session_date"
       },
       {
         "dtype": "float64",
@@ -45,6 +45,10 @@
         "name": "rvol"
       },
       {
+        "dtype": "datetime64[ns, UTC]",
+        "name": "asof_utc"
+      },
+      {
         "dtype": "string",
         "name": "ticker"
       },
@@ -73,6 +77,7 @@
       "volume",
       "rv",
       "rvol",
+      "asof_utc",
       "ret_cc",
       "ret_oo",
       "ret_co",
@@ -84,11 +89,11 @@
     ]
   },
   "shape": {
-    "cols": 13,
-    "end_utc": "2026-02-17T05:00:00+00:00",
+    "cols": 14,
+    "end_utc": "2026-02-18T00:00:00+00:00",
     "n_assets": 1,
-    "rows": 1285,
-    "start_utc": "2021-01-04T05:00:00+00:00"
+    "rows": 1286,
+    "start_utc": "2021-01-04T00:00:00+00:00"
   },
   "spec": {
     "gold": {

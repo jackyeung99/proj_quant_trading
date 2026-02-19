@@ -64,7 +64,7 @@ def load_controlled_cfg(entry_path: str = "config/data.yaml") -> dict:
         merged = deep_merge(loaded, inline_overrides)
 
         # For pipeline steps, keep enabled separate from the cfg payload
-        if section in {"ingestion", "silver", "gold", "signal", "execution"}:
+        if section in {"ingestion", "silver", "gold", "signal", "execution", "evaluation"}:
             cfg[section] = {"enabled": enabled, "cfg": merged}
         else:
             # non-step sections like storage/sources are always "enabled"
