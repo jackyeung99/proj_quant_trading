@@ -37,7 +37,6 @@ class StoragePaths:
     - Partition style: key=val folders for query-friendly datasets.
     """
     # top-level namespaces (inside storage root)
-    results: str = "results"
     bronze: str = "data/bronze"
     silver: str = "data/silver"
     gold: str = "data/gold"
@@ -45,6 +44,7 @@ class StoragePaths:
 
     # artifacts
     artifacts: str = "artifacts"
+    results: str = "artifacts/backtesting_results"
     live_dir: str = "artifacts/live"              # weights + signals
     models_dir: str = "artifacts/live/models"
     weights_dir: str = "artifacts/live/weights"

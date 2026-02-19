@@ -23,7 +23,6 @@ class StateSignalModel(Strategy):
         self.w_low_: float | None = None
         self.w_high_: float | None = None
         self.state_var_: str | None = None
-        self.weight_allocation: str | None = None
 
     def parse_params(self, spec: RunSpec) -> dict:
         params = spec.params or {}
@@ -48,8 +47,7 @@ class StateSignalModel(Strategy):
             "tau_star": self.tau_,
             "w_low": self.w_low_,
             "w_high": self.w_high_,
-            "state_var": self.state_var_,
-            "weight_allocation": self.weight_allocation,
+            "state_var": self.state_var_
         }
 
     def required_features(self, spec: RunSpec) -> list[str]:
