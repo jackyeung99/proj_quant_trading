@@ -171,11 +171,20 @@ class LiveStore:
             snapshot_id = meta.get("snapshot_id") or _parse_snapshot_id_from_key(str(k))
 
             trained_at_utc = meta.get("trained_at_utc") or meta.get("trained_at")
-            # keep as string for storage; convert later if needed
             trained_at_utc = None if trained_at_utc in (None, "", "unknown") else str(trained_at_utc)
 
-            # daily join key (should already be a YYYY-MM-DD-like string)
-            train_end_session_date = meta.get("train_end_session_date") or meta.get("train_end")
+            market_tz = meta.get("market_tz") or "America/New_York"
+
+            trained_at_utc = meta.get("trained_at_utc")
+
+            # stored as UTC stamps (good to keep tz-aware)
+            train_start_asof_utc = meta.get("train_start_asof_utc")
+            train_end_asof_utc = meta.get("train_end_asof_utc")
+
+            # stored as session_date-ish strings but currently include tz "+00:00"
+            train_start_session = meta.get("train_start_session_date")
+            train_end_session = meta.get("train_end_session_date")
+
 
             # strategy_meta may be nested
             strat_meta = meta.get("strategy_meta", {}) or {}
@@ -183,18 +192,29 @@ class LiveStore:
                 strat_meta = {}
 
             row = {
+                # join/index fields
+                "session_date": train_end_session,
+
+                # identity/lineage
                 "snapshot_id": snapshot_id,
-                "trained_at_utc": trained_at_utc,
-                "train_start_ts_utc": meta.get("train_start_ts_utc"),
-                "train_end_ts_utc": meta.get("train_end_ts_utc"),
-                "train_start_session_date": meta.get("train_start_session_date"),
-                "train_end_session_date": train_end_session_date,
                 "config_hash": meta.get("config_hash"),
+
+                # timing
+                "trained_at_utc": trained_at_utc,
+                "train_start_asof_utc": train_start_asof_utc,
+                "train_end_asof_utc": train_end_asof_utc,
+                "train_start_session_date": train_start_session,
+                "train_end_session_date": train_end_session,
+
+                # config
                 "retrain_freq": meta.get("retrain_freq"),
                 "train_lookback_bars": meta.get("train_lookback_bars"),
                 "min_train_bars": meta.get("min_train_bars"),
                 "bundle_version": meta.get("bundle_version"),
-                # flatten strategy meta (tau_star, w_low, w_high, state_var, etc.)
+                "market_tz": market_tz,
+                "cutoff_hour": meta.get("cutoff_hour"),
+
+                # flattened strategy meta
                 **strat_meta,
             }
             rows.append(row)
