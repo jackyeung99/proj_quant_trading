@@ -102,37 +102,62 @@ def _merge_asof_left(
 
 def fill_in_force(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Generic forward-fill policy:
-      - *_weight: numeric ffill then 0
-      - id-like cols: string ffill
-      - *_utc stamps: datetime ffill (keep tz-aware UTC)
-      - numeric-ish cols: numeric ffill
-      - otherwise: leave as-is
+    Deterministic forward-fill policy:
+
+      - *_weight            -> numeric ffill then 0
+      - *_utc               -> datetime (tz-aware UTC) ffill
+      - id-like columns     -> string ffill
+      - numeric parameters  -> numeric ffill
+      - string parameters   -> string ffill
+      - portfolio_value/ret -> leave untouched
     """
     x = df.copy()
 
+    # Explicit categories
     id_like = {"config_hash", "snapshot_id", "model_snapshot_id", "market_tz"}
+    no_fill = {"portfolio_value", "ret"}
 
     for c in x.columns:
+        if c in no_fill:
+            continue
+
         s = x[c]
 
+        # ----------------------------------------
+        # 1) Weight columns
+        # ----------------------------------------
         if c.endswith("_weight"):
             x[c] = pd.to_numeric(s, errors="coerce").ffill().fillna(0.0)
             continue
 
-        if c in id_like:
-            x[c] = s.astype("string").ffill()
-            continue
-
-        if c.endswith("_utc") or c in {"trained_at_utc"}:
+        # ----------------------------------------
+        # 2) UTC timestamp columns
+        # ----------------------------------------
+        if c.endswith("_utc") or c == "trained_at_utc":
             dt = pd.to_datetime(s, errors="coerce", utc=True)
             x[c] = dt.ffill()
             continue
 
-        # heuristic: if mostly numeric, treat as numeric series
-        sn = pd.to_numeric(s, errors="coerce")
-        if sn.notna().mean() > 0.80:
-            x[c] = sn.ffill()
+        # ----------------------------------------
+        # 3) ID-like columns
+        # ----------------------------------------
+        if c in id_like:
+            x[c] = s.astype("string").ffill()
+            continue
+
+        # ----------------------------------------
+        # 4) Numeric columns (model params, macro, gold)
+        # ----------------------------------------
+        if pd.api.types.is_numeric_dtype(s):
+            x[c] = s.ffill()
+            continue
+
+        # ----------------------------------------
+        # 5) Object/string columns (state_var etc.)
+        # ----------------------------------------
+        if pd.api.types.is_object_dtype(s) or pd.api.types.is_string_dtype(s):
+            x[c] = s.astype("string").ffill()
+            continue
 
     return x
 
