@@ -160,11 +160,12 @@ def signal(
         strat.fit(train_inputs, spec)
         logger.info("Model fit complete")
 
-        train_start_ts_utc = pd.to_datetime(train_inputs.features.index.min(), utc=True)
-        train_end_ts_utc = pd.to_datetime(train_inputs.features.index.max(), utc=True)
+        train_start_session = pd.Timestamp(train_inputs.features.index.min()).normalize()
+        train_end_session   = pd.Timestamp(train_inputs.features.index.max()).normalize()
 
-        train_start_session = _session_date_from_ts(train_start_ts_utc, market_tz=market_tz)
-        train_end_session = _session_date_from_ts(train_end_ts_utc, market_tz=market_tz)
+        # audit stamps at cutoff (UTC, tz-aware)
+        train_start_asof_utc = _stamp_asof_utc(train_start_session, market_tz=market_tz, hour=cutoff_hour)
+        train_end_asof_utc   = _stamp_asof_utc(train_end_session,   market_tz=market_tz, hour=cutoff_hour)
 
         trained_at_utc = now_iso  # keep UTC iso
         snapshot_id = make_snapshot_id(trained_at_utc, cfg_hash)
@@ -174,8 +175,8 @@ def signal(
             feature_cols=list(train_inputs.features.columns),
             ret_cols=list(train_inputs.ret.columns),
             trained_at=trained_at_utc,     # UTC iso
-            train_start=str(train_start_ts_utc),
-            train_end=str(train_end_ts_utc),
+            train_start=str(train_start_asof_utc),
+            train_end=str(train_end_asof_utc),
             config_hash=cfg_hash,
         )
 
@@ -186,10 +187,10 @@ def signal(
             "config_hash": cfg_hash,
 
             # training window keys (daily + exact)
-            "train_start_ts_utc": train_start_ts_utc.isoformat(),
-            "train_end_ts_utc": train_end_ts_utc.isoformat(),
             "train_start_session_date": str(train_start_session),
             "train_end_session_date": str(train_end_session),
+            "train_start_asof_utc": str(train_start_asof_utc),
+            "train_end_asof_utc": str(train_end_asof_utc),
 
             # config
             "retrain_freq": retrain_freq,
@@ -228,9 +229,12 @@ def signal(
     inputs_now = prepare_inputs(data_adapter, spec, required_cols=req)
     inputs_now = enforce_bundle_schema(bundle, inputs_now)
 
-    last_feat_ts_utc = pd.to_datetime(inputs_now.features.index.max(), utc=True)
-    session_date = _session_date_from_ts(last_feat_ts_utc, market_tz=market_tz)
+    last_idx = pd.Timestamp(inputs_now.features.index.max())
 
+    # since index is a NY-normalized session_date label (tz-na ive midnight)
+    session_date = last_idx.normalize()  # tz-naive midnight
+
+    # asof_utc = cutoff time for that session label
     asof_utc = _stamp_asof_utc(session_date, market_tz=market_tz, hour=cutoff_hour)
 
     w_ts = bundle.model.predict(inputs_now, spec)

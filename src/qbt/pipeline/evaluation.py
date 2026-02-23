@@ -1,75 +1,135 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 import pandas as pd
 
 from qbt.core.logging import get_logger
 from qbt.execution.alpaca_client import AlpacaTradingAPI
 from qbt.storage.artifacts import LiveStore
 from qbt.metrics.summary import compute_metrics_simple
-from qbt.utils.dates import _ensure_session_index, _merge_asof_left
+from qbt.data.merge import join_daily, fill_in_force
+
+# NOTE: consider moving these into qbt.data.merge / qbt.utils.dates for reuse
+from qbt.utils.dates import _ensure_session_index
+
 
 logger = get_logger(__name__)
 
+# ---------------------------------------------------------------------
+# Defaults / configuration
+# ---------------------------------------------------------------------
+
+DEFAULT_STAMP_COLS: set[str] = {
+    # join key (sometimes stored as column)
+    "session_date",
+    # common stamps
+    "asof_utc",
+    "generated_at_utc",
+    "trained_at_utc",
+    "trained_at",
+    "train_start_ts_utc",
+    "train_end_ts_utc",
+    # lineage / ids
+    "config_hash",
+    "snapshot_id",
+    "model_snapshot_id",
+    # misc
+    "market_tz",
+    "cutoff_hour",
+    "period",
+    "timeframe",
+    "extended_hours",
+    "base_value",
+}
 
 
-
+# ---------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------
 
 def _equity_to_returns(df: pd.DataFrame, *, equity_col: str = "portfolio_value") -> pd.Series:
     eq = pd.to_numeric(df[equity_col], errors="coerce").astype(float)
     return eq.pct_change().fillna(0.0)
 
 
-def _prep_weights_wide(weights: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+def prep_state_ts(
+    df: pd.DataFrame | None,
+    *,
+    keep_cols: list[str] | None = None,
+    drop_cols: set[str] | None = None,
+    rename: dict[str, str] | None = None,
+) -> pd.DataFrame:
     """
-    Keep only session_date + asset weights.
-    Rename asset columns to '<asset>_weight'.
+    Generic prep for any time-series artifact indexed (or indexable) by session_date.
+    - normalizes index using _ensure_session_index
+    - optional rename
+    - optional keep/drop columns
+    - sorts + de-dupes index (keep last)
     """
-    w = _ensure_session_index(weights)
-    w = w.sort_index()
+    if df is None or df.empty:
+        return pd.DataFrame()
 
-    meta_cols = {"generated_at_utc", "asof_utc", "config_hash", "market_tz", "cutoff_hour"}
-    asset_cols = [c for c in w.columns if c not in meta_cols]
+    x = _ensure_session_index(df).sort_index()
+
+    if rename:
+        x = x.rename(columns=rename)
+
+    if keep_cols is not None:
+        cols = [c for c in keep_cols if c in x.columns]
+        x = x[cols]
+    elif drop_cols:
+        x = x[[c for c in x.columns if c not in drop_cols]]
+
+    # keep last snapshot for that session_date
+    x = x[~x.index.duplicated(keep="last")]
+    return x
+
+
+def prep_weights_wide(
+    weights: pd.DataFrame | None,
+    *,
+    stamp_cols: set[str] = DEFAULT_STAMP_COLS,
+) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Convert weights snapshots into a wide daily table:
+      index = session_date
+      cols  = <asset>_weight
+
+    Any columns that look like stamps/lineage are ignored via stamp_cols.
+    """
+    w = prep_state_ts(weights)
+    if w.empty:
+        return pd.DataFrame(), []
+
+    asset_cols = [c for c in w.columns if c not in stamp_cols]
 
     # numeric + fill
     for c in asset_cols:
         w[c] = pd.to_numeric(w[c], errors="coerce").fillna(0.0)
 
-    # rename to <asset>_weight
     rename_map = {c: f"{c}_weight" for c in asset_cols}
     w = w.rename(columns=rename_map)
-    renamed_cols = list(rename_map.values())
 
-    # keep only weight cols, drop duplicate index entries (keep last snapshot for that session)
-    w = w[renamed_cols]
-    w = w[~w.index.duplicated(keep="last")]
+    weight_cols = list(rename_map.values())
+    w = w[weight_cols].astype(float)
 
-    # (optional) ensure float dtype
-    w = w.astype(float)
+    return w, weight_cols
 
-    return w, renamed_cols
 
-def _session_index_naive_midnight(idx: pd.Index) -> pd.DatetimeIndex:
+def prep_meta_ts(meta: pd.DataFrame | None) -> pd.DataFrame:
     """
-    Canonical session index:
-      - DatetimeIndex
-      - midnight
-      - tz-naive
+    Meta is already "meta columns"; we only ensure session index + dedupe.
+    You may drop large nested objects here if present.
     """
-    di = pd.DatetimeIndex(pd.to_datetime(idx, errors="coerce"))
-    if di.tz is not None:
-        di = di.tz_convert("UTC").tz_localize(None)   # drop tz safely
-    return di.normalize()
-
-def _prep_meta(meta_ts: pd.DataFrame) -> pd.DataFrame:
-    if meta_ts is None or meta_ts.empty:
-        return pd.DataFrame()
-
-    return meta_ts
+    # Example: drop large nested dict column if exists
+    drop = set()
+    if meta is not None and not meta.empty and "strategy_meta" in meta.columns:
+        drop.add("strategy_meta")
+    return prep_state_ts(meta, drop_cols=drop if drop else None)
 
 
-def _prep_gold(
-    gold: pd.DataFrame,
+def prep_gold_wide(
+    gold: pd.DataFrame | None,
     *,
     session_col: str = "session_date",
     ticker_col: str = "ticker",
@@ -79,31 +139,21 @@ def _prep_gold(
     Convert long gold table into wide format:
         index = session_date
         columns = <ticker>_<feature>
-
-    Assumes gold has columns:
-        session_date, ticker, feature1, feature2, ...
-
-    Returns:
-        Wide DataFrame indexed by session_date.
     """
-
     if gold is None or gold.empty:
         return pd.DataFrame()
 
     df = gold.copy()
 
-    # ---- normalize session_date ----
     df[session_col] = pd.to_datetime(df[session_col], errors="coerce").dt.normalize()
     df = df.dropna(subset=[session_col, ticker_col])
 
-    # ---- choose value columns ----
     id_cols = {session_col, ticker_col}
     if drop_cols:
         id_cols |= set(drop_cols)
 
     value_cols = [c for c in df.columns if c not in id_cols]
 
-    # ---- pivot ----
     wide = (
         df.pivot_table(
             index=session_col,
@@ -114,22 +164,26 @@ def _prep_gold(
         .sort_index()
     )
 
-    # ---- flatten columns ----
     if isinstance(wide.columns, pd.MultiIndex):
-        # (feature, ticker) → ticker_feature
+        # (feature, ticker) -> ticker_feature
         wide.columns = [f"{t}_{f}" for f, t in wide.columns]
 
     wide.index.name = session_col
-
     return wide
 
-def _prep_equity(df: pd.DataFrame) -> pd.DataFrame:
+
+def prep_equity_panel(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardize Alpaca portfolio history to:
+      index = session_date (as provided by caller)
+      col   = portfolio_value
+    """
     x = df.copy()
 
-    # normalize naming
     if "equity" in x.columns and "portfolio_value" not in x.columns:
         x = x.rename(columns={"equity": "portfolio_value"})
 
+    # Expect caller already provides a daily timestamp column; we treat it as session_date.
     x = (
         x.rename(columns={"timestamp": "session_date"})
          .set_index("session_date")
@@ -138,20 +192,32 @@ def _prep_equity(df: pd.DataFrame) -> pd.DataFrame:
 
     x["portfolio_value"] = pd.to_numeric(x["portfolio_value"], errors="coerce")
 
-    # -------------------------------------------------
-    # Drop rows before first non-zero equity
-    # -------------------------------------------------
+    # Drop rows before first non-zero equity (avoid long zero warmup)
     mask_started = x["portfolio_value"] != 0.0
-
     if mask_started.any():
-        first_valid = mask_started.idxmax()  # first True
+        first_valid = mask_started.idxmax()
         x = x.loc[first_valid:]
     else:
-        return x.iloc[0:0]  # empty if never funded
+        return x.iloc[0:0]
 
     return x[["portfolio_value"]]
 
+
+
+# ---------------------------------------------------------------------
+# Main entry
+# ---------------------------------------------------------------------
+
 def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
+    """
+    Evaluation step:
+      1) fetch portfolio equity history (UTC)
+      2) load weights snapshots, model meta snapshots, gold features
+      3) canonicalize & merge on session_date
+      4) in-force forward-fill
+      5) compute returns & metrics
+      6) persist panel + metrics
+    """
     client = AlpacaTradingAPI(cfg=execution_cfg.get("alpaca", {}) or {})
     logger.debug("Alpaca client initialized")
 
@@ -169,7 +235,7 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
     period = port_cfg.get("period", "2M")
     timeframe = port_cfg.get("timeframe", "1D")
 
-    portfolio = client.get_historical_equity(
+    portfolio_raw = client.get_historical_equity(
         period=period,
         timeframe=timeframe,
         extended_hours=False,
@@ -178,109 +244,67 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
         date_end=end_iso,
     )
 
-    portfolio = _prep_equity(portfolio)
+    # If Alpaca returns UTC timestamps at midnight, your session_date should be market day label.
+    # Ideally: convert portfolio_raw["timestamp"] from UTC -> market_tz then normalize.
+    market_tz = execution_cfg.get("market_tz", "America/New_York")
+    ts_utc = pd.to_datetime(portfolio_raw["timestamp"], utc=True, errors="coerce")
+    portfolio_raw = portfolio_raw.copy()
+    portfolio_raw["timestamp"] = ts_utc.dt.tz_convert(market_tz).dt.normalize().dt.tz_localize(None)
 
-    # print(portfolio.tz_convert("America/New_York"))
+    portfolio = prep_equity_panel(portfolio_raw)
+    # print(portfolio)
+
     # ------------------------------------------------------------
     # 2) Weights snapshots
     # ------------------------------------------------------------
     weights_raw = live_storage.read_all_weights(strategy=strategy, universe=universe)
-    weights_wide, asset_cols = _prep_weights_wide(weights_raw)
+    weights_wide, weight_cols = prep_weights_wide(weights_raw)
 
     # ------------------------------------------------------------
     # 3) Gold daily features
     # ------------------------------------------------------------
     gold = live_storage.storage.read_parquet(gold_path)
-
-    gold_wide = _prep_gold(
+    gold_wide = prep_gold_wide(
         gold,
         drop_cols={"open", "high", "low", "close", "volume"},
-    )   
+    )
+    gold_wide = prep_state_ts(gold_wide)  # ensure session index if not already
 
 
     # ------------------------------------------------------------
     # 4) Model meta snapshots
     # ------------------------------------------------------------
     meta_raw = live_storage.read_all_model_meta(strategy=strategy, universe=universe)
-    meta_sd = _prep_meta(meta_raw)
-    
-
+    meta_sd = prep_meta_ts(meta_raw)
     # ------------------------------------------------------------
-    # 5) Merge (asof on session_date index)
+    # 5) Merge on session_date
     # ------------------------------------------------------------
     merged = portfolio
+    merged = join_daily(merged, weights_wide)
+    merged = join_daily(merged, meta_sd)
+    merged = join_daily(merged, gold_wide)
 
-    if not weights_wide.empty:
-        merged = _merge_asof_left(merged, weights_wide)
-
-    if not meta_raw.empty:
-        merged = _merge_asof_left(merged, meta_raw)
-
-    if not gold_wide.empty:
-        merged = _merge_asof_left(merged, gold_wide)
-
-    # print(merged.tz_convert("America/New_York"))
-    # print("portfolio idx sample:", portfolio.index[:3], portfolio.index.tz)
-    # print("weights idx sample:", weights_wide.index[:3], weights_wide.index.tz)
-    # print("meta idx sample:", meta_sd.index[:3], meta_sd.index.tz)
-    # print("gold idx sample:", gold_wide.index[:3], gold_wide.index.tz)
     # ------------------------------------------------------------
-    # 6) Forward-fill in-force quantities
+    # 6) Forward-fill in-force columns (generic)
     # ------------------------------------------------------------
-    for col in asset_cols:
-        if col in merged.columns:
-            merged[col] = (
-                pd.to_numeric(merged[col], errors="coerce")
-                .ffill()
-                .fillna(0.0)
-            )
-
-    meta_cols = [
-        "tau_star",
-        "w_low",
-        "w_high",
-        "state_var",
-        "weight_allocation",
-        "config_hash",
-    ]
-
-    for col in meta_cols:
-        if col in merged.columns:
-            if col == "config_hash":
-                merged[col] = merged[col].astype("string").ffill()
-            else:
-                merged[col] = (
-                    pd.to_numeric(merged[col], errors="coerce")
-                    .ffill()
-                )
+    merged = fill_in_force(merged)
 
     # ------------------------------------------------------------
     # 7) Returns + metrics
     # ------------------------------------------------------------
-    merged["ret"] = _equity_to_returns(
-        merged,
-        equity_col="portfolio_value",
-    )
+    merged["strategy_ret"] = _equity_to_returns(merged, equity_col="portfolio_value")
 
     ann_factor = int(execution_cfg.get("perf", {}).get("ann_factor", 252))
-    metrics = compute_metrics_simple(
-        merged["ret"],
-        ann_factor=ann_factor,
-    )
+    metrics = compute_metrics_simple(merged["strategy_ret"], ann_factor=ann_factor)
 
     # ------------------------------------------------------------
     # 8) Persist
     # ------------------------------------------------------------
-
     live_storage.write_portfolio_performance(
         strategy=strategy,
         universe=universe,
         df=merged,
-        metrics=metrics
+        metrics=metrics,
     )
 
-
-    return {
-        "metrics": metrics,
-        "merged": merged,
-    }
+    return {"metrics": metrics, "merged": merged}

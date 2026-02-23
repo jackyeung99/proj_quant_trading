@@ -3,6 +3,7 @@ from dataclasses import asdict
 from typing import Dict, Any, Optional, List
 import pandas as pd
 import json
+import re
 
 
 from qbt.core.exceptions import StorageError
@@ -122,11 +123,17 @@ class LiveStore:
         """
         Read all model meta snapshots for (strategy, universe) and return a time-series DF.
 
-        Expects snapshot layout:
-        live/models/strategy=.../universe=.../snapshots/asof=.../meta.json
+        Expected snapshot layout (recommended):
+        models/{strategy}/{universe}/snapshots/{snapshot_id}/meta.json
 
         Returns:
-        DataFrame indexed by trained_at (UTC), columns include strategy_meta fields.
+        DataFrame indexed by session_date (tz-naive midnight),
+        with columns including:
+            - snapshot_id
+            - trained_at_utc
+            - config_hash
+            - train_* fields
+            - flattened strategy_meta fields (tau_star, w_low, ...)
         """
         prefix = self.paths.model_snapshot_prefix(strategy, universe)
         keys = self.storage.list(prefix)
@@ -134,13 +141,23 @@ class LiveStore:
         if not keys:
             return pd.DataFrame()
 
-        # keep only meta.json files inside snapshots
-        meta_keys = [k for k in keys if str(k).endswith("/meta.json") or str(k).endswith("meta.json")]
+        # keep only meta.json files
+        meta_keys = [k for k in keys if str(k).endswith("meta.json")]
         if not meta_keys:
             return pd.DataFrame()
-        
 
-        rows = []
+        def _parse_snapshot_id_from_key(k: str) -> str | None:
+            # works for .../snapshots/<snapshot_id>/meta.json or .../snapshot_id=<...>/meta.json
+            s = str(k)
+            m = re.search(r"/snapshots/([^/]+)/meta\.json$", s)
+            if m:
+                return m.group(1)
+            m = re.search(r"/snapshot_id=([^/]+)/meta\.json$", s)
+            if m:
+                return m.group(1)
+            return None
+
+        rows: list[dict] = []
 
         for k in meta_keys:
             try:
@@ -151,24 +168,34 @@ class LiveStore:
             if not meta:
                 continue
 
-            trained_at = meta.get("trained_at")
-            if not trained_at:
-                # fallback: parse from folder name if present
-                # e.g. ".../asof=2026-02-18T20-56-11Z/meta.json"
-                trained_at = None
+            snapshot_id = meta.get("snapshot_id") or _parse_snapshot_id_from_key(str(k))
 
+            trained_at_utc = meta.get("trained_at_utc") or meta.get("trained_at")
+            # keep as string for storage; convert later if needed
+            trained_at_utc = None if trained_at_utc in (None, "", "unknown") else str(trained_at_utc)
+
+            # daily join key (should already be a YYYY-MM-DD-like string)
+            train_end_session_date = meta.get("train_end_session_date") or meta.get("train_end")
+
+            # strategy_meta may be nested
             strat_meta = meta.get("strategy_meta", {}) or {}
+            if not isinstance(strat_meta, dict):
+                strat_meta = {}
 
             row = {
-                "trained_at": trained_at,
-                "train_end": meta.get("train_end"),
-                "train_end_session_date": meta.get("train_end_session_date"),
+                "snapshot_id": snapshot_id,
+                "trained_at_utc": trained_at_utc,
+                "train_start_ts_utc": meta.get("train_start_ts_utc"),
+                "train_end_ts_utc": meta.get("train_end_ts_utc"),
+                "train_start_session_date": meta.get("train_start_session_date"),
+                "train_end_session_date": train_end_session_date,
                 "config_hash": meta.get("config_hash"),
                 "retrain_freq": meta.get("retrain_freq"),
                 "train_lookback_bars": meta.get("train_lookback_bars"),
                 "min_train_bars": meta.get("min_train_bars"),
                 "bundle_version": meta.get("bundle_version"),
-                **strat_meta,  # tau_star, w_low, w_high, state_var, etc.
+                # flatten strategy meta (tau_star, w_low, w_high, state_var, etc.)
+                **strat_meta,
             }
             rows.append(row)
 
@@ -177,11 +204,17 @@ class LiveStore:
 
         df = pd.DataFrame(rows)
 
-        # drop rows missing trained_at
-        df["session_date"] = pd.to_datetime(df["train_end_session_date"], utc=True, errors="coerce")
+        # Build session_date index (tz-naive midnight)
+        # IMPORTANT: don't do utc=True here; this is a daily label, not an event timestamp.
+        df["session_date"] = pd.to_datetime(df["train_end_session_date"], errors="coerce").dt.normalize()
         df = df.dropna(subset=["session_date"]).set_index("session_date").sort_index()
 
-        # if duplicates, keep last
+        # De-dup: if multiple snapshots map to same session_date, keep the last by trained_at_utc
+        if "trained_at_utc" in df.columns:
+            ta = pd.to_datetime(df["trained_at_utc"], utc=True, errors="coerce")
+            df = df.assign(_trained_at_sort=ta).sort_values(["session_date", "_trained_at_sort"])
+            df = df.drop(columns=["_trained_at_sort"])
+
         df = df[~df.index.duplicated(keep="last")]
 
         return df

@@ -22,31 +22,6 @@ def _ensure_session_index(df: pd.DataFrame) -> pd.DataFrame:
 
     raise ValueError("Expected 'session_date' as index or column.")
 
-def _merge_asof_left(
-    left: pd.DataFrame,
-    right: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    Asof-merge on index (expects both indexed by session_date).
-    Backward direction (last known value in force).
-    """
-
-    if not isinstance(left.index, pd.DatetimeIndex):
-        raise ValueError("Left must be indexed by DatetimeIndex (session_date).")
-
-    if not isinstance(right.index, pd.DatetimeIndex):
-        raise ValueError("Right must be indexed by DatetimeIndex (session_date).")
-
-    l = left.sort_index()
-    r = right.sort_index()
-
-    return pd.merge_asof(
-        l,
-        r,
-        left_index=True,
-        right_index=True,
-        direction="backward",
-    )
 
 def _to_daily_index(ts: pd.Series) -> pd.DatetimeIndex:
     # Normalize to date (still tz-aware); use date boundary in exchange tz
@@ -71,15 +46,42 @@ def _session_date_from_ts(ts: pd.Timestamp, *, market_tz: str) -> pd.Timestamp:
 
     return ts.tz_convert(market_tz).normalize().tz_localize(None)
 
+def stamp_asof_utc_from_session_dates(
+    session_dates: pd.DatetimeIndex,
+    *,
+    market_tz: str,
+    cutoff_hour: float,
+) -> pd.DatetimeIndex:
+    """
+    session_dates: tz-naive midnight labels.
+    returns: tz-aware UTC timestamps at cutoff_hour local time.
+    """
+    sd = pd.DatetimeIndex(pd.to_datetime(session_dates, errors="coerce")).normalize()
+    local = sd.tz_localize(market_tz) + pd.to_timedelta(cutoff_hour, unit="h")
+    return local.tz_convert("UTC")
+
 
 def _stamp_asof_utc(session_date: pd.Timestamp, *, market_tz: str, hour: float) -> pd.Timestamp:
     """
-    session_date is naive midnight. Return tz-aware UTC timestamp at {hour}:00 market time.
-    Supports fractional hours (e.g., 16.5).
+    session_date: intended to be a daily label (midnight).
+      - If tz-aware, convert to market_tz then drop tz.
+      - If tz-naive, treat as already a session label.
+    Returns tz-aware UTC timestamp at {hour} local market time.
     """
+    sd = pd.Timestamp(session_date)
+
+    # If tz-aware, convert to market tz and drop tz (label)
+    if sd.tzinfo is not None:
+        sd = sd.tz_convert(market_tz).tz_localize(None)
+
+    # normalize to midnight label
+    sd = sd.normalize()
+
     h = int(hour)
     m = int(round((hour - h) * 60))
-    return (session_date.tz_localize(market_tz) + pd.Timedelta(hours=h, minutes=m)).tz_convert("UTC")
+
+    local = sd.tz_localize(market_tz) + pd.Timedelta(hours=h, minutes=m)
+    return local.tz_convert("UTC")
 
 def _parse_cutoff(cutoff_hour: float) -> pd.Timedelta:
     h = int(cutoff_hour)

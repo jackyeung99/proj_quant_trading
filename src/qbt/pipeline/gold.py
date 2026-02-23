@@ -14,6 +14,7 @@ from qbt.features.apply import apply_transforms
 from qbt.features.transforms import DAILY_TRANSFORMS
 from qbt.features.intraday_transforms import INTRA_FEATURE_FUNCS
 from qbt.data.loaders import load_multi_asset_flat_long
+from qbt.utils.dates import stamp_asof_utc_from_session_dates
 
 logger = get_logger(__name__)
 
@@ -100,36 +101,25 @@ def _per_ticker_daily(
     if daily.empty:
         return daily
 
-    # --------------------------------------------------
-    # session_date (merge key) = midnight naive
-    # --------------------------------------------------
-    daily.index.name = "session_date"
-    
+    # Force session_date to tz-naive midnight labels
+    idx = pd.to_datetime(daily.index, errors="coerce")
+    if getattr(idx, "tz", None) is not None:
+        idx = idx.tz_convert("UTC").tz_localize(None)
+    idx = idx.normalize()
+    daily.index = pd.DatetimeIndex(idx, name="session_date")
 
-    # Convert to tz-aware midnight Eastern
-    session_midnight_et = (
-        daily.index
-        .tz_localize(market_tz)  # attach NY timezone
+    # Stamp cutoff as-of UTC
+    daily["asof_utc"] = stamp_asof_utc_from_session_dates(
+        daily.index,
+        market_tz=market_tz,
+        cutoff_hour=cutoff_hour,
     )
 
-    # Add 17:00 (5PM ET)
-    stamp_et = session_midnight_et + pd.Timedelta(hours=cutoff_hour)
-
-    # Convert to UTC
-    stamp_utc = stamp_et.tz_convert("UTC")
-
-    daily["asof_utc"] = stamp_utc
-
-    # --------------------------------------------------
-    # Reset index after stamping
-    # --------------------------------------------------
     daily = daily.reset_index()
     daily["ticker"] = ticker
 
     if daily_cfg:
         daily = apply_transforms(daily, daily_cfg, DAILY_TRANSFORMS)
-
-
 
     return daily.sort_values("session_date").reset_index(drop=True)
 
