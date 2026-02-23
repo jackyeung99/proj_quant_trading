@@ -180,6 +180,7 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
 
     portfolio = _prep_equity(portfolio)
 
+    # print(portfolio.tz_convert("America/New_York"))
     # ------------------------------------------------------------
     # 2) Weights snapshots
     # ------------------------------------------------------------
@@ -194,13 +195,15 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
     gold_wide = _prep_gold(
         gold,
         drop_cols={"open", "high", "low", "close", "volume"},
-    )
+    )   
+
 
     # ------------------------------------------------------------
     # 4) Model meta snapshots
     # ------------------------------------------------------------
     meta_raw = live_storage.read_all_model_meta(strategy=strategy, universe=universe)
     meta_sd = _prep_meta(meta_raw)
+    
 
     # ------------------------------------------------------------
     # 5) Merge (asof on session_date index)
@@ -216,6 +219,11 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
     if not gold_wide.empty:
         merged = _merge_asof_left(merged, gold_wide)
 
+    # print(merged.tz_convert("America/New_York"))
+    # print("portfolio idx sample:", portfolio.index[:3], portfolio.index.tz)
+    # print("weights idx sample:", weights_wide.index[:3], weights_wide.index.tz)
+    # print("meta idx sample:", meta_sd.index[:3], meta_sd.index.tz)
+    # print("gold idx sample:", gold_wide.index[:3], gold_wide.index.tz)
     # ------------------------------------------------------------
     # 6) Forward-fill in-force quantities
     # ------------------------------------------------------------

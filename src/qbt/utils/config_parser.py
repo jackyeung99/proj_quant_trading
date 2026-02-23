@@ -6,15 +6,6 @@ import hashlib
 from typing import Any, Dict
 
 
-def config_hash(cfg: Dict[str, Any], *, length: int = 16) -> str:
-    """
-    Stable hash for a config dict.
-    - order-independent
-    - JSON-serializable
-    - suitable for retrain invalidation
-    """
-    payload = json.dumps(cfg, sort_keys=True, default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:length]
 
 def load_yaml(path: str) -> dict:
     return yaml.safe_load(Path(path).read_text())

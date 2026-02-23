@@ -75,28 +75,34 @@ class AlpacaTradingAPI:
         timeframe: str = "1D",
         extended_hours: bool = True,
         as_df: bool = True,
-        tz: str = "UTC",
-        date_start: str | None = None,   # "YYYY-MM-DD"
-        date_end: str | None = None,     # "YYYY-MM-DD"
+        tz: str = "UTC",                    # display tz
+        date_start: str | None = None,      # "YYYY-MM-DD"
+        date_end: str | None = None,        # "YYYY-MM-DD"
     ):
         url = self.base_url.rstrip("/") + "/account/portfolio/history"
         headers = self._headers()
 
-        params = {
+        params: dict[str, Any] = {
             "period": period,
             "timeframe": timeframe,
             "extended_hours": str(bool(extended_hours)).lower(),
         }
+
+        # Force DATE strings (no implicit isoformat -> date truncation surprises)
+        def _as_date_str(x: str) -> str:
+            # Accept "YYYY-MM-DD" or any Timestamp-ish, but always send date
+            return str(pd.Timestamp(x).date())
+
         if date_start:
-            params["date_start"] = str(pd.Timestamp(date_start).date())
+            params["date_start"] = _as_date_str(date_start)
         if date_end:
-            params["date_end"] = str(pd.Timestamp(date_end).date())
+            params["date_end"] = _as_date_str(date_end)
 
-            r = requests.get(url, headers=headers, params=params, timeout=self.timeout_s)
-            if r.status_code != 200:
-                raise RuntimeError(f"Alpaca error {r.status_code}: {r.text[:300]}")
+        r = requests.get(url, headers=headers, params=params, timeout=self.timeout_s)
+        if r.status_code != 200:
+            raise RuntimeError(f"Alpaca error {r.status_code}: {r.text[:300]}")
 
-            js = r.json() or {}
+        js = r.json() or {}
 
         if not as_df:
             return js
@@ -106,18 +112,21 @@ class AlpacaTradingAPI:
         pl = js.get("profit_loss") or []
         plp = js.get("profit_loss_pct") or []
 
-        df = pd.DataFrame({
-            "timestamp": pd.to_datetime(ts, unit="s", utc=True),
-            "equity": pd.to_numeric(eq, errors="coerce"),
-            "profit_loss": pd.to_numeric(pl, errors="coerce"),
-            "profit_loss_pct": pd.to_numeric(plp, errors="coerce"),
-        }).dropna(subset=["timestamp", "equity"]).sort_values("timestamp")
+        df = pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(ts, unit="s", utc=True),
+                "equity": pd.to_numeric(eq, errors="coerce"),
+                "profit_loss": pd.to_numeric(pl, errors="coerce"),
+                "profit_loss_pct": pd.to_numeric(plp, errors="coerce"),
+            }
+        ).dropna(subset=["timestamp", "equity"]).sort_values("timestamp")
 
+        # metadata
         df["period"] = period
         df["timeframe"] = timeframe
         df["extended_hours"] = bool(extended_hours)
 
-        
+        # convert for display/merging
         if tz and tz.upper() != "UTC":
             df["timestamp"] = df["timestamp"].dt.tz_convert(tz)
 

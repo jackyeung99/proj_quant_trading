@@ -137,7 +137,7 @@ class StoragePaths:
         return _p(self.weights_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "latest.parquet")
 
     def weights_snapshot_key(self, strategy: str, universe: str, asof: str) -> str:
-        return _p(self.weights_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "snapshots", f"asof={_clean(asof)}.parquet")
+        return _p(self.weights_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "snapshots", f"session_date={_clean(asof)}.parquet")
     
     def weights_snapshots_prefix(self, strategy: str, universe: str):
          return _p(self.weights_dir, f"strategy={_clean(strategy)}", f"universe={_clean(universe)}", "snapshots")

@@ -35,6 +35,7 @@ class ModelBundle:
     feature_cols: list[str]
     ret_cols: list[str]
     trained_at: str
+    train_start: str
     train_end: str
     config_hash: str
 

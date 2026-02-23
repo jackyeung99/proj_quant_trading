@@ -214,26 +214,20 @@ class LiveStore:
         # SNAPSHOT (versioned)
         # -------------------------
         if snapshot:
-            trained_at  = str(meta.get("trained_at", "unknown"))
+            trained_at_utc  = str(meta.get("trained_at_utc", "unknown"))
 
             # model snapshot
             self.storage.write_pickle(
                 bundle,
-                self.paths.model_snapshot_pkl_key(strategy=strategy, universe=universe, trained_at=trained_at),
+                self.paths.model_snapshot_pkl_key(strategy=strategy, universe=universe, trained_at=trained_at_utc),
             )
 
             # meta snapshot
             self.storage.write_json(
                 meta,
-                self.paths.model_snapshot_meta_key(strategy=strategy, universe=universe, trained_at=trained_at),
+                self.paths.model_snapshot_meta_key(strategy=strategy, universe=universe, trained_at=trained_at_utc),
             )
 
-            # params snapshot (ONLY HERE)
-            if params is not None:
-                self.storage.write_json(
-                    params,
-                    self.paths.model_snapshot_params_key(strategy=strategy, universe=universe, trained_at=trained_at),
-                )
     # ---------------------------------------------------------------------
     # Weights (signal output): latest + snapshot(asof)
     # ---------------------------------------------------------------------
@@ -450,6 +444,7 @@ class LiveStore:
             return
 
         now_utc = pd.Timestamp.now(tz="UTC")
+
         now_iso = now_utc.isoformat()
 
         # -----------------------------

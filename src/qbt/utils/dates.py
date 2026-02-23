@@ -60,12 +60,14 @@ def _to_utc(ts: str | pd.Timestamp) -> pd.Timestamp:
 
 def _session_date_from_ts(ts: pd.Timestamp, *, market_tz: str) -> pd.Timestamp:
     """
-    Return session date as a pure date (YYYY-MM-DD),
-    based on market timezone.
+    Return session date (tz-naive midnight) based on market timezone.
     """
 
+    ts = pd.to_datetime(ts)
+
+    # If tz-naive, assume it's UTC (your pipeline is UTC-first)
     if ts.tzinfo is None:
-        return ts.date()
+        ts = ts.tz_localize("UTC")
 
     return ts.tz_convert(market_tz).normalize().tz_localize(None)
 
