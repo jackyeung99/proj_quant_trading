@@ -190,25 +190,22 @@ class S3Storage(Storage):
     def list(self, prefix: str) -> list[str]:
         self._init_fs()
 
-        key_prefix = self._key(prefix)
-        uri = f"s3://{self.bucket}/{key_prefix}"
-
+        key_prefix = self._key(prefix).rstrip("/")
+        root = f"{self.bucket}/{key_prefix}" if key_prefix else f"{self.bucket}/{self.prefix.strip('/')}".rstrip("/")
+        # s3fs.find expects "bucket/prefix" (no s3://)
         try:
-            paths = self._fs.ls(uri, detail=False)
+            paths = self._fs.find(root)
         except FileNotFoundError:
             return []
 
         out = []
         for p in paths:
-            # p format: bucket/prefix/... or s3://bucket/...
+            # p is like "bucket/prefix/...."
             if p.startswith(f"{self.bucket}/"):
                 k = p[len(self.bucket) + 1 :]
-            elif p.startswith("s3://"):
-                k = p.split("/", 3)[-1]
             else:
                 k = p
 
-            # remove configured prefix so key matches read/write API
             pref = self.prefix.strip("/")
             if pref and k.startswith(pref + "/"):
                 k = k[len(pref) + 1 :]

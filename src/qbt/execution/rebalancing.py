@@ -24,6 +24,8 @@ META_COLS = {
     "config_hash",
     "market_tz",
     "cutoff_hour",
+    "session_date", 
+    "snapshot_id"
 }
 
 CASH_LIKE = {"CASH", "USD"}  # keep if you handle cash separately

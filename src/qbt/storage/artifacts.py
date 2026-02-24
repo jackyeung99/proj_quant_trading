@@ -5,12 +5,15 @@ import pandas as pd
 import json
 import re
 
+from qbt.core.logging import get_logger
 
 from qbt.core.exceptions import StorageError
 from qbt.core.types import ModelBundle
 from qbt.core.types import RunMeta
 from qbt.storage.storage import Storage
 from qbt.storage.paths import StoragePaths
+
+logger = get_logger(__name__)
 
 _REQUIRED_TS_COLS = ["port_ret_gross", "port_ret_net", "equity_gross", "equity_net"]
 
@@ -120,34 +123,21 @@ class LiveStore:
     
 
     def read_all_model_meta(self, strategy: str, universe: str) -> pd.DataFrame:
-        """
-        Read all model meta snapshots for (strategy, universe) and return a time-series DF.
-
-        Expected snapshot layout (recommended):
-        models/{strategy}/{universe}/snapshots/{snapshot_id}/meta.json
-
-        Returns:
-        DataFrame indexed by session_date (tz-naive midnight),
-        with columns including:
-            - snapshot_id
-            - trained_at_utc
-            - config_hash
-            - train_* fields
-            - flattened strategy_meta fields (tau_star, w_low, ...)
-        """
         prefix = self.paths.model_snapshot_prefix(strategy, universe)
         keys = self.storage.list(prefix)
 
         if not keys:
+            # logger.info("read_all_model_meta: no keys under prefix=%s", prefix)
             return pd.DataFrame()
 
-        # keep only meta.json files
         meta_keys = [k for k in keys if str(k).endswith("meta.json")]
         if not meta_keys:
+            logger.info("read_all_model_meta: no meta.json under prefix=%s (keys=%d)", prefix, len(keys))
             return pd.DataFrame()
 
+        # logger.info("read_all_model_meta: prefix=%s keys=%d meta_keys=%d", prefix, len(keys), len(meta_keys))
+
         def _parse_snapshot_id_from_key(k: str) -> str | None:
-            # works for .../snapshots/<snapshot_id>/meta.json or .../snapshot_id=<...>/meta.json
             s = str(k)
             m = re.search(r"/snapshots/([^/]+)/meta\.json$", s)
             if m:
@@ -158,55 +148,55 @@ class LiveStore:
             return None
 
         rows: list[dict] = []
+        n_read_ok = 0
+        n_read_fail = 0
+        n_empty_meta = 0
 
         for k in meta_keys:
             try:
                 meta = self.storage.read_json(k)
-            except Exception:
+                n_read_ok += 1
+            except Exception as e:
+                n_read_fail += 1
+                logger.warning("read_all_model_meta: read_json failed key=%s err=%r", str(k), e)
                 continue
 
             if not meta:
+                n_empty_meta += 1
+                logger.debug("read_all_model_meta: empty meta key=%s", str(k))
                 continue
 
             snapshot_id = meta.get("snapshot_id") or _parse_snapshot_id_from_key(str(k))
 
+            # keep fallback + unknown-handling (DO NOT overwrite later)
             trained_at_utc = meta.get("trained_at_utc") or meta.get("trained_at")
             trained_at_utc = None if trained_at_utc in (None, "", "unknown") else str(trained_at_utc)
 
             market_tz = meta.get("market_tz") or "America/New_York"
 
-            trained_at_utc = meta.get("trained_at_utc")
-
-            # stored as UTC stamps (good to keep tz-aware)
             train_start_asof_utc = meta.get("train_start_asof_utc")
             train_end_asof_utc = meta.get("train_end_asof_utc")
 
-            # stored as session_date-ish strings but currently include tz "+00:00"
             train_start_session = meta.get("train_start_session_date")
             train_end_session = meta.get("train_end_session_date")
 
-
-            # strategy_meta may be nested
             strat_meta = meta.get("strategy_meta", {}) or {}
             if not isinstance(strat_meta, dict):
+                logger.warning("read_all_model_meta: strategy_meta not dict key=%s type=%s", str(k), type(strat_meta))
                 strat_meta = {}
 
-            row = {
-                # join/index fields
-                "session_date": train_end_session,
+            rows.append({
+                "session_date": train_end_session,  # raw; we will canonicalize below
 
-                # identity/lineage
                 "snapshot_id": snapshot_id,
                 "config_hash": meta.get("config_hash"),
 
-                # timing
                 "trained_at_utc": trained_at_utc,
                 "train_start_asof_utc": train_start_asof_utc,
                 "train_end_asof_utc": train_end_asof_utc,
                 "train_start_session_date": train_start_session,
                 "train_end_session_date": train_end_session,
 
-                # config
                 "retrain_freq": meta.get("retrain_freq"),
                 "train_lookback_bars": meta.get("train_lookback_bars"),
                 "min_train_bars": meta.get("min_train_bars"),
@@ -214,30 +204,51 @@ class LiveStore:
                 "market_tz": market_tz,
                 "cutoff_hour": meta.get("cutoff_hour"),
 
-                # flattened strategy meta
                 **strat_meta,
-            }
-            rows.append(row)
+            })
+
+        logger.info(
+            "read_all_model_meta: read_ok=%d read_fail=%d empty_meta=%d rows=%d",
+            n_read_ok, n_read_fail, n_empty_meta, len(rows)
+        )
 
         if not rows:
             return pd.DataFrame()
 
         df = pd.DataFrame(rows)
 
-        # Build session_date index (tz-naive midnight)
-        # IMPORTANT: don't do utc=True here; this is a daily label, not an event timestamp.
-        df["session_date"] = pd.to_datetime(df["train_end_session_date"], errors="coerce").dt.normalize()
+        # ---- Canonicalize session_date (daily label) robustly ----
+        # Safest if you only need the date label:
+        # take YYYY-MM-DD regardless of timezone suffix or full ISO timestamp.
+        raw = df["train_end_session_date"].astype("string")
+        # e.g. "2026-02-20T00:00:00+00:00" -> "2026-02-20"
+        date_part = raw.str.slice(0, 10)
+
+        df["session_date"] = pd.to_datetime(date_part, errors="coerce")
+
+        bad = int(df["session_date"].isna().sum())
+        if bad:
+            # log a few examples to diagnose cloud-only parsing failures
+            examples = df.loc[df["session_date"].isna(), "train_end_session_date"].head(5).tolist()
+            logger.warning("read_all_model_meta: %d/%d session_date parse failures; examples=%s", bad, len(df), examples)
+
         df = df.dropna(subset=["session_date"]).set_index("session_date").sort_index()
 
-        # De-dup: if multiple snapshots map to same session_date, keep the last by trained_at_utc
+        # ---- De-dup by trained_at ----
         if "trained_at_utc" in df.columns:
             ta = pd.to_datetime(df["trained_at_utc"], utc=True, errors="coerce")
             df = df.assign(_trained_at_sort=ta).sort_values(["session_date", "_trained_at_sort"])
             df = df.drop(columns=["_trained_at_sort"])
 
+        before = len(df)
         df = df[~df.index.duplicated(keep="last")]
+        dropped = before - len(df)
+        # if dropped:
+        #     logger.info("read_all_model_meta: dropped %d duplicates by session_date", dropped)
 
+        # logger.info("read_all_model_meta: out shape=%s range=%s..%s", df.shape, df.index.min(), df.index.max())
         return df
+    
 
     def write_model(
         self,
