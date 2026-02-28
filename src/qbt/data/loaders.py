@@ -32,10 +32,22 @@ def load_multi_asset_flat_long(
         df = storage.read_parquet(key=key)
         if df is None or len(df) == 0:
             continue
-
+    
         # timestamp from column or index
         ts_raw = df[timestamp_col] if timestamp_col in df.columns else df.index
-        ts = pd.to_datetime(ts_raw, errors="coerce", utc=utc)
+
+        if isinstance(ts_raw, pd.Series):
+            ts_series = ts_raw
+        else:
+            ts_series = pd.Series(ts_raw)
+
+        if not pd.api.types.is_datetime64_any_dtype(ts_series):
+            ts = pd.to_datetime(ts_series, errors="coerce", utc=utc)
+        else:
+            ts = ts_series
+            if utc and getattr(ts.dt, "tz", None) is None:
+                ts = ts.dt.tz_localize("UTC")
+
 
         out = df.copy()
         out[timestamp_col] = ts

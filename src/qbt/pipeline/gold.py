@@ -7,7 +7,7 @@ import pandas as pd
 from qbt.core.logging import get_logger
 from qbt.storage.storage import Storage
 from qbt.storage.paths import StoragePaths
-from qbt.storage.feature_store import write_gold_long_with_manifest
+from qbt.storage.feature_store import write_gold_wide_with_manifest
 
 from qbt.features.aggregations import aggregate_intraday_to_daily_features
 from qbt.features.apply import apply_transforms
@@ -17,6 +17,14 @@ from qbt.data.loaders import load_multi_asset_flat_long
 from qbt.utils.dates import stamp_asof_utc_from_session_dates
 
 logger = get_logger(__name__)
+
+
+'''
+TO DO: 
+
+REFACTOR this and clean up logic specifically around merging features at the target frequency
+
+'''
 
 def normalize_gold_cfg(gold_cfg: dict) -> dict:
     cfg = dict(gold_cfg or {})
@@ -90,11 +98,13 @@ def merge_daily_sources(
         freq="1d",
         assets=daily_assets,
         timestamp_col="timestamp",
+        fields= ['close', ] ,
         asset_col="ticker",
     )
 
     if daily is None or daily.empty:
         return gold
+
 
     daily["session_date"] = (
         pd.to_datetime(daily["timestamp"], utc=True)
@@ -104,6 +114,7 @@ def merge_daily_sources(
     )
 
     daily = daily.drop(columns=["timestamp"])
+  
 
     # --- CRITICAL: make macro time-safe ---
     # shift by 1 day to avoid look-ahead
@@ -112,13 +123,18 @@ def merge_daily_sources(
              .groupby("ticker", as_index=False)
              .apply(lambda g: g.shift(1))
              .reset_index(drop=True)
+             .dropna()
     )
 
+    daily = (
+        daily.pivot(index="session_date", columns="ticker", values="close")
+        .reset_index()
+        )
+    
     merged = gold.merge(
         daily,
-        on=["ticker", "session_date"],
+        on="session_date",
         how="left",
-        suffixes=("", "_daily"),
     )
 
     return merged
@@ -245,7 +261,27 @@ def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict
           .reset_index(drop=True)
     )
 
-    gold = merge_daily_sources(storage, paths, gold, daily_assets=daily_assets)
+    wide = (
+        gold.reset_index()
+        .melt(
+            id_vars=['session_date','ticker'],
+            # value_vars='',
+            var_name="field",
+            value_name="value",
+        )
+        .pivot_table(
+            index='session_date',
+            columns=['ticker', "field"],
+            values="value",
+            aggfunc="last",
+        )
+        .sort_index()
+        .sort_index(axis=1)
+    )
+    wide = wide.copy().sort_index().sort_index(axis=1, level=[0, 1])
+    wide.columns = [f"{a}_{f}" for a, f in wide.columns]
+    
+    gold = merge_daily_sources(storage, paths, wide, daily_assets=daily_assets)
 
     # small summary (avoid printing whole df)
     g0 = gold["session_date"].min() if "session_date" in gold.columns else None
@@ -253,7 +289,7 @@ def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict
     logger.info(f"Gold assembled | rows={len(gold)} cols={len(gold.columns)} session0={g0} session1={g1}")
 
     # write + manifest
-    write_gold_long_with_manifest(storage, paths, gold, gold_cfg=gold_cfg)
+    write_gold_wide_with_manifest(storage, paths, gold, gold_cfg=gold_cfg)
     logger.info("Gold write complete")
 
     return gold

@@ -53,7 +53,7 @@ def canonicalize_macro(
     timestamp_col: str = "timestamp",
     name_col: str = "name",
     value_col: str = "value",
-    out_dt_col: str = "datetime",
+    out_dt_col: str = "timestamp",
     out_ticker_col: str = "ticker",
     out_close_col: str = "close",
 ) -> pd.DataFrame:

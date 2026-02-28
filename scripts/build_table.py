@@ -44,7 +44,7 @@ def main():
     cfg['gold']['cfg']['tag'] = 'experiment'
     cfg['gold']['cfg']['daily_assets'] =  ['OVXCLS', 'DCOILWTICO', 'DHHNGSP', 'GASREGCOVW']
 
-    print(cfg['gold'])
+
     # ---- Per-run id ----
     cfg["run_id"] = new_run_id()
 
@@ -65,13 +65,13 @@ def main():
     artifact_store = LiveStore(storage, paths)
 
     # # ---- Run ingestion + silver ----
-    ingest_all_sources(storage=storage, paths=paths, ingestion_cfg=cfg['ingestion'], sources_cfg=cfg['sources'])
+    # ingest_all_sources(storage=storage, paths=paths, ingestion_cfg=cfg['ingestion'], sources_cfg=cfg['sources'])
 
-    canonicalize_all(
-        storage=storage,
-        paths=paths,
-        sources_cfg=cfg["sources"],
-    )
+    # canonicalize_all(
+    #     storage=storage,
+    #     paths=paths,
+    #     sources_cfg=cfg["sources"],
+    # )
 
     build_gold_model_table(
         storage,
