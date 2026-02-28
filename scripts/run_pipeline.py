@@ -13,11 +13,7 @@ from qbt.storage.paths import StoragePaths
 from qbt.pipeline.run import run_pipeline
 from qbt.core.logging import setup_logging
 from qbt.utils.config_parser import load_controlled_cfg
-
-
-def new_run_id() -> str:
-    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    return f"{ts}_{uuid.uuid4().hex[:6]}"
+from qbt.utils.stamping import new_run_id
 
 
 def parse_args():

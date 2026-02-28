@@ -68,7 +68,7 @@ class StoragePaths:
 
     # ----- silver keys -----
     def silver_bars_key(self, *, freq: str, ticker: str) -> str:
-        return _p(self.silver, f"freq={_clean(freq)}", f"ticker={_clean(ticker)}", "bars.parquet")
+        return _p(self.silver, f"freq={_clean(freq)}", f"symbol={_clean(ticker)}", "bars.parquet")
 
     # ----- gold keys -----
     def gold_table_key(self, *, freq: str, tag: str = "default") -> str:

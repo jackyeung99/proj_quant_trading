@@ -2,7 +2,12 @@ import pandas as pd
 import json
 import hashlib
 from typing import Any, Dict
+import uuid
+from datetime import datetime
 
+def new_run_id() -> str:
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    return f"{ts}_{uuid.uuid4().hex[:6]}"
 
 def make_snapshot_id(trained_at_utc: str, config_hash: str | None = None) -> str:
     ts = pd.to_datetime(trained_at_utc, utc=True, errors="coerce")

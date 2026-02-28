@@ -38,7 +38,7 @@ class StateSignalModel(Strategy):
             "gamma": float(params.get("gamma", 5.0)),
             "weight_type": str(params.get('weight_allocation', 'binary')),
             "w_min": float(params.get("w_min", 0.0)),
-            "w_max": float(params.get("w_high", 3.0)),
+            "w_max": float(params.get("w_high", 1.0)),
             "eps": float(params.get("eps", 1e-12)),
         }
     

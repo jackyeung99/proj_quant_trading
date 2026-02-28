@@ -24,6 +24,5 @@ equities_intraday_5m:
 macro_fred:
   enabled: False
   provider: fred
-  symbols: [ "TB3MS" , "DTB4WK"]
-      # "VIXCLS", "DGS10", "DGS2"]
+  symbols: [ "TB3MS" , "DTB4WK", 'OVXCLS', 'DCOILWTICO', 'DHHNGSP', 'GASREGCOVW']
   interval: "1d"

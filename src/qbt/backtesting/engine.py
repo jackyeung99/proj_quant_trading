@@ -52,8 +52,6 @@ def build_weights(
     bt: BacktestSpec
 ) -> pd.DataFrame:
 
- 
-
     # ---- no walk-forward ----
     if not bt.use_walk_forward:
         strat.fit(inputs, spec)

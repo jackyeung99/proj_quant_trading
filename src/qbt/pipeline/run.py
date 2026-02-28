@@ -25,6 +25,7 @@ def run_pipeline(storage, paths, cfg, artifact_store):
             ingestion_cfg=cfg["ingestion"]['cfg'],
             sources_cfg=cfg["sources"],
         )
+        
 
     if cfg["silver"]["enabled"]:
         canonicalize_all(

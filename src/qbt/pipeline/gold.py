@@ -29,11 +29,12 @@ def normalize_gold_cfg(gold_cfg: dict) -> dict:
     cfg["cutoff_hour"] = float(cutoff)
 
     cfg["daily_transforms"] = cfg.get("daily_transforms", []) or []
-    cfg["assets"] = cfg.get("assets", []) or []
+    cfg["intraday_assets"] = cfg.get("intraday_assets", []) or []
+    cfg["daily_assets"] = cfg.get("daily_assets", []) or []
     cfg["intra_features"] = cfg.get("intra_features", []) or []
 
     # light validation (optional but helpful)
-    if not isinstance(cfg["assets"], list):
+    if not isinstance(cfg["daily_assets"], list):
         raise ValueError("gold_cfg.assets must be a list")
     if cfg["cutoff_hour"] <= 0 or cfg["cutoff_hour"] >= 24:
         raise ValueError("gold_cfg.cutoff_hour must be in (0, 24)")
@@ -75,7 +76,52 @@ def build_intra_feature_specs(gold_cfg: dict) -> list[dict]:
 
     return out
 
+def merge_daily_sources(
+    storage: Storage,
+    paths: StoragePaths,
+    gold: pd.DataFrame,
+    daily_assets: Sequence[str] | None = None,
+) -> pd.DataFrame:
 
+    # Load daily SILVER (freq = "1D")
+    daily = load_multi_asset_flat_long(
+        storage,
+        paths,
+        freq="1d",
+        assets=daily_assets,
+        timestamp_col="timestamp",
+        asset_col="ticker",
+    )
+
+    if daily is None or daily.empty:
+        return gold
+
+    daily["session_date"] = (
+        pd.to_datetime(daily["timestamp"], utc=True)
+          .dt.tz_convert("UTC")
+          .dt.tz_localize(None)
+          .dt.normalize()
+    )
+
+    daily = daily.drop(columns=["timestamp"])
+
+    # --- CRITICAL: make macro time-safe ---
+    # shift by 1 day to avoid look-ahead
+    daily = (
+        daily.sort_values(["ticker", "session_date"])
+             .groupby("ticker", as_index=False)
+             .apply(lambda g: g.shift(1))
+             .reset_index(drop=True)
+    )
+
+    merged = gold.merge(
+        daily,
+        on=["ticker", "session_date"],
+        how="left",
+        suffixes=("", "_daily"),
+    )
+
+    return merged
 
 
 def _per_ticker_daily(
@@ -132,7 +178,8 @@ def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict
     cutoff_hour = cfg["cutoff_hour"]
 
     daily_cfg = cfg["daily_transforms"]
-    assets = cfg["assets"]
+    assets = cfg["intraday_assets"]
+    daily_assets = cfg['daily_assets']
     feature_specs = build_intra_feature_specs(cfg)
 
     logger.info(
@@ -197,6 +244,8 @@ def build_gold_model_table(storage: Storage, paths: StoragePaths, gold_cfg: dict
           .sort_values(["ticker", "session_date"])
           .reset_index(drop=True)
     )
+
+    gold = merge_daily_sources(storage, paths, gold, daily_assets=daily_assets)
 
     # small summary (avoid printing whole df)
     g0 = gold["session_date"].min() if "session_date" in gold.columns else None
