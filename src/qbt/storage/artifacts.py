@@ -17,10 +17,38 @@ logger = get_logger(__name__)
 
 _REQUIRED_TS_COLS = ["port_ret_gross", "port_ret_net", "equity_gross", "equity_net"]
 
+
+
+
+def _flatten_dict(d: dict, *, prefix: str = "", sep: str = "__") -> dict:
+    """Flatten nested dicts into columns: params__foo__bar."""
+    out: dict[str, Any] = {}
+    for k, v in (d or {}).items():
+        kk = f"{prefix}{sep}{k}" if prefix else str(k)
+        if isinstance(v, dict):
+            out.update(_flatten_dict(v, prefix=kk, sep=sep))
+        else:
+            out[kk] = v
+    return out
+
+
 class BacktestStore:
-    def __init__(self, storage: Storage, paths: StoragePaths):
+    """
+    Writes:
+      - experiment-scoped run summary table: one row per run_id (meta + params + metrics)
+      - per-run timeseries parquet (already includes weights + model_state columns)
+      - (optional) per-run meta.json for exact reproducibility
+
+    Assumes StoragePaths now supports experiment-aware keys, e.g.:
+      - paths.run_summary_key(experiment)
+      - paths.run_timeseries_key(experiment, strategy, universe, run_id)
+      - paths.run_meta_key(experiment, run_id)
+    """
+
+    def __init__(self, storage: "Storage", paths: "StoragePaths", *, experiment: str):
         self.storage = storage
         self.paths = paths
+        self.experiment = experiment
 
     def _validate_timeseries(self, ts: pd.DataFrame) -> None:
         missing = [c for c in _REQUIRED_TS_COLS if c not in ts.columns]
@@ -31,21 +59,40 @@ class BacktestStore:
         if not ts.index.is_monotonic_increasing:
             raise StorageError("Timeseries index must be increasing.")
 
-    def write_run(self, meta: RunMeta, timeseries: pd.DataFrame, metrics: Dict[str, Any]) -> None:
+    def write_run(
+        self,
+        meta: "RunMeta",
+        timeseries: pd.DataFrame,
+        metrics: Dict[str, Any],
+        *,
+        write_meta_json: bool = True,
+        include_params_columns: bool = True,
+        include_model_state_summary: bool = True,
+    ) -> None:
         self._validate_timeseries(timeseries)
 
-        # 1) write timeseries
-        ts_key = self.paths.run_timeseries_key(meta.strategy_name, meta.universe, meta.run_id)
+        # ----------------------------
+        # 1) write timeseries (single parquet)
+        # ----------------------------
+        ts_key = self.paths.run_timeseries_key(
+            self.experiment, meta.strategy_name, meta.universe, meta.run_id
+        )
+
         ts_to_write = timeseries.copy()
+        # store index explicitly for easy reloads
+        if "date" not in ts_to_write.columns:
+            ts_to_write = ts_to_write.copy()
+            ts_to_write.insert(0, "date", ts_to_write.index)
+
         ts_to_write.insert(0, "run_id", meta.run_id)
         self.storage.write_parquet(ts_to_write, ts_key)
 
-        # 2) write meta json
-        self.storage.write_json(asdict(meta), self.paths.run_meta_key(meta.run_id))
+        # ----------------------------
+        # 3) upsert run summary row (meta + params + metrics)
+        # ----------------------------
+        summary_key = self.paths.runs_summary_key(self.experiment)
 
-        # 3) upsert registry row (runs.parquet)
-        runs_key = self.paths.runs_key()
-        row = {
+        row: Dict[str, Any] = {
             "run_id": meta.run_id,
             "strategy_name": meta.strategy_name,
             "universe": meta.universe,
@@ -53,40 +100,62 @@ class BacktestStore:
             "data_path": meta.data_path,
             "weight_lag": meta.weight_lag,
             "tag": meta.tag,
-            "params": json.dumps(meta.params or {}, sort_keys=True),
         }
-        runs_df = self.storage.read_parquet(runs_key) if self.storage.exists(runs_key) else pd.DataFrame()
-        runs_df = self._upsert(runs_df, row, key="run_id")
-        self.storage.write_parquet(runs_df, runs_key)
 
-        # 4) upsert metrics row (metrics.parquet)
-        metrics_key = self.paths.metrics_key()
-        mrow = {"run_id": meta.run_id, **metrics}
-        metrics_df = self.storage.read_parquet(metrics_key) if self.storage.exists(metrics_key) else pd.DataFrame()
-        metrics_df = self._upsert(metrics_df, mrow, key="run_id")
-        self.storage.write_parquet(metrics_df, metrics_key)
+        # lossless params
+        params = meta.params or {}
+        row["params_json"] = json.dumps(params, sort_keys=True)
 
-    def read_runs(self) -> pd.DataFrame:
-        key = self.paths.runs_key()
+        # flattened param columns for easy filtering/groupby
+        if include_params_columns:
+            flat = _flatten_dict(params, prefix="params")
+            row.update(flat)
+
+        # merge metrics into same row
+        for k, v in (metrics or {}).items():
+            row[f"metric__{k}"] = v
+
+        # optional: store fitted summary (last tau, etc) if present
+        if include_model_state_summary:
+            for col in ("tau_star", "w_low", "w_high"):
+                if col in timeseries.columns:
+                    s = pd.to_numeric(timeseries[col], errors="coerce").dropna()
+                    row[f"model__{col}_final"] = float(s.iloc[-1]) if not s.empty else np.nan
+
+        # upsert into summary parquet
+        summary_df = (
+            self.storage.read_parquet(summary_key)
+            if self.storage.exists(summary_key)
+            else pd.DataFrame()
+        )
+        summary_df = self._upsert(summary_df, row, key="run_id")
+        self.storage.write_parquet(summary_df, summary_key)
+
+    # ----------------------------
+    # Reads
+    # ----------------------------
+    def read_run_summary(self) -> pd.DataFrame:
+        key = self.paths.run_summary_key(self.experiment)
         return self.storage.read_parquet(key) if self.storage.exists(key) else pd.DataFrame()
 
-    def read_meta(self, run_id) -> pd.DataFrame:
-        key = self.paths.run_meta_key(run_id)
+    def read_meta(self, run_id: str) -> Dict[str, Any]:
+        key = self.paths.run_meta_key(self.experiment, run_id)
         return self.storage.read_json(key) if self.storage.exists(key) else {}
 
-    def read_metrics(self) -> pd.DataFrame:
-        key = self.paths.metrics_key()
-        return self.storage.read_parquet(key) if self.storage.exists(key) else pd.DataFrame()
-
     def read_timeseries(self, strategy: str, universe: str, run_id: str) -> pd.DataFrame:
-        key = self.paths.run_timeseries_key(strategy, universe, run_id)
+        key = self.paths.run_timeseries_key(self.experiment, strategy, universe, run_id)
         df = self.storage.read_parquet(key)
-        # return date-indexed
+
+        # restore date index
         if "date" in df.columns:
-            df["date"] = pd.to_datetime(df["date"])
-            df = df.set_index("date")
+            df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
+            df = df.set_index("date").sort_index()
+
         return df
 
+    # ----------------------------
+    # Helpers
+    # ----------------------------
     @staticmethod
     def _upsert(df: pd.DataFrame, row: Dict[str, Any], key: str) -> pd.DataFrame:
         row_df = pd.DataFrame([row])
@@ -95,6 +164,10 @@ class BacktestStore:
         if key in df.columns:
             df = df[df[key] != row[key]]
         return pd.concat([df, row_df], ignore_index=True)
+
+
+
+
 
 class LiveStore:
     """

@@ -38,24 +38,26 @@ def run_backtest(
     artifact_store: BacktestStore,
 ) -> None:
     result = engine.run(spec, bt_spec)
-    # artifact_store.write_run(result.meta, result.timeseries, result.metrics)
-    # print(
-    #     "Wrote run:",
-    #     result.meta.run_id,
-    #     "|",
-    #     spec.strategy_name,
-    #     "|",
-    #     spec.universe,
-    #     "| tag:",
-    #     spec.tag,
-    # )
+
+    artifact_store.write_run(result.meta, result.timeseries, result.metrics)
+    print(
+        "Wrote run:",
+        result.meta.run_id,
+        "|",
+        spec.strategy_name,
+        "|",
+        spec.universe,
+        "| tag:",
+        spec.tag,
+    )
 
 
 def main():
     # --- storage ---
     storage = LocalStorage(base_dir=Path("."))
     paths = StoragePaths()
-    artifact_store = BacktestStore(storage, paths)
+    experiment_name = 'macro_variables'
+    artifact_store = BacktestStore(storage, paths, experiment=experiment_name)
 
     # --- engine ---
     bt = BacktestEngine(storage=storage)
@@ -71,7 +73,7 @@ def main():
     weight_types = ["binary", "mean_var"]
 
     for state_var, weight_type in product(state_vars, weight_types):
-
+            
         cfg = deep_update(
             base_state,
             {
