@@ -1,8 +1,6 @@
 from pathlib import Path
 import shutil
-import pandas as pd
-
-from qbt.storage.paths import StoragePaths
+from typing import Optional
 
 
 # --------------------
@@ -11,99 +9,94 @@ from qbt.storage.paths import StoragePaths
 MAIN_REPO = Path(__file__).resolve().parents[1]   # proj_quant_trading
 DASH_REPO = MAIN_REPO.parent / "qbt_dashboard"
 
-SRC_ROOT = MAIN_REPO            
-DST_ROOT = DASH_REPO
-
-paths = StoragePaths()
+SRC_ROOT = MAIN_REPO / "artifacts" / "backtesting_results"
+DST_ROOT = DASH_REPO / "results"   # per your updated route
 
 
 # --------------------
 # HELPERS
 # --------------------
-def key_to_local_path(root: Path, key: str) -> Path:
-    """Convert StoragePaths key -> local filesystem path."""
-    return root / key
-
-
-def ensure_dir(p: Path):
+def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
-def convert_parquet_to_csv_table(src: Path, dst: Path):
-    """For normal tables like runs/metrics: index not needed."""
-    print(f"Converting {src} -> {dst}")
-    df = pd.read_parquet(src)
+def copy_file(src: Path, dst: Path, *, overwrite: bool = False) -> None:
+    """
+    Copy a single file. If overwrite=False and dst exists, skip.
+    """
     ensure_dir(dst.parent)
-    df.to_csv(dst, index=False)
-
-
-def convert_parquet_to_csv_timeseries(src: Path, dst: Path):
-    """For timeseries: preserve datetime index in first column."""
-    print(f"Converting {src} -> {dst}")
-    df = pd.read_parquet(src)
-    ensure_dir(dst.parent)
-    df.to_csv(dst, index=True)
-
-
-def copy_json(src: Path, dst: Path):
-    print(f"Copying {src} -> {dst}")
-    ensure_dir(dst.parent)
+    if dst.exists() and not overwrite:
+        # keep existing results
+        return
     shutil.copy2(src, dst)
+
+
+def copy_tree(src_dir: Path, dst_dir: Path, *, overwrite: bool = False) -> None:
+    """
+    Copy a directory tree preserving structure.
+    If overwrite=False, existing files are preserved.
+    """
+    for p in src_dir.rglob("*"):
+        rel = p.relative_to(src_dir)
+        out = dst_dir / rel
+        if p.is_dir():
+            ensure_dir(out)
+        else:
+            copy_file(p, out, overwrite=overwrite)
 
 
 # --------------------
 # MAIN
 # --------------------
-def main():
+def main(experiment: Optional[str] = None, *, overwrite: bool = False) -> None:
     if not DASH_REPO.exists():
         raise RuntimeError(f"Dashboard repo not found: {DASH_REPO}")
 
-    dst_results = DST_ROOT / paths.results
+    if not SRC_ROOT.exists():
+        raise RuntimeError(f"Source artifacts not found: {SRC_ROOT}")
 
-    print("Cleaning dashboard results directory...")
-    if dst_results.exists():
-        shutil.rmtree(dst_results)
-    ensure_dir(dst_results)
+    ensure_dir(DST_ROOT)
 
-    # ---- export runs ----
-    runs_key = paths.runs_key()
-    src_runs = key_to_local_path(SRC_ROOT, runs_key)
-    if src_runs.exists():
-        dst_runs = key_to_local_path(DST_ROOT, runs_key).with_suffix(".csv")
-        convert_parquet_to_csv_table(src_runs, dst_runs)
-    else:
-        print(f"Missing: {src_runs}")
+    # If experiment is provided, copy only that partition (merge into existing)
+    if experiment is not None:
+        src_exp = SRC_ROOT / f"experiment={experiment}"
+        if not src_exp.exists():
+            raise RuntimeError(f"Experiment not found: {src_exp}")
 
-    # ---- export metrics ----
-    metrics_key = paths.metrics_key()
-    src_metrics = key_to_local_path(SRC_ROOT, metrics_key)
-    if src_metrics.exists():
-        dst_metrics = key_to_local_path(DST_ROOT, metrics_key).with_suffix(".csv")
-        convert_parquet_to_csv_table(src_metrics, dst_metrics)
-    else:
-        print(f"Missing: {src_metrics}")
+        dst_exp = DST_ROOT / src_exp.name
 
-    # ---- export meta + timeseries ----
-    ts_root = SRC_ROOT / paths.results / "timeseries"
-    runs_root = SRC_ROOT / paths.results / "runs"
+        print(f"Copying one experiment (no delete): {src_exp} -> {dst_exp}")
+        ensure_dir(dst_exp)
 
-    if runs_root.exists():
-        for run_dir in runs_root.iterdir():
-            meta_src = run_dir / "meta.json"
-            if meta_src.exists():
-                meta_dst = DST_ROOT / paths.results / "runs" / run_dir.name / "meta.json"
-                copy_json(meta_src, meta_dst)
+        copy_tree(src_exp, dst_exp, overwrite=overwrite)
 
-    if ts_root.exists():
-        print("Exporting timeseries...")
-        for pq in ts_root.rglob("*.parquet"):
-            rel = pq.relative_to(SRC_ROOT)
-            out_csv = (DST_ROOT / rel).with_suffix(".csv")
-            convert_parquet_to_csv_timeseries(pq, out_csv)
+        print("\n✅ Export complete.")
+        print(f"Target: {dst_exp}")
+        print(f"Overwrite: {overwrite}")
+        return
 
-    print("\n✅ Dashboard results exported successfully.")
-    print(f"Target: {dst_results}")
+    # Otherwise: copy all experiments (merge into results/)
+    print(f"Copying ALL experiments (no delete): {SRC_ROOT} -> {DST_ROOT}")
+
+    # DO NOT delete DST_ROOT
+    # Just merge/copy each experiment folder into results/
+    for exp_dir in SRC_ROOT.glob("experiment=*"):
+        if exp_dir.is_dir():
+            dst_exp = DST_ROOT / exp_dir.name
+            ensure_dir(dst_exp)
+            copy_tree(exp_dir, dst_exp, overwrite=overwrite)
+
+    print("\n✅ Export complete.")
+    print(f"Target: {DST_ROOT}")
+    print(f"Overwrite: {overwrite}")
 
 
 if __name__ == "__main__":
-    main()
+    # Option A: copy everything, keep existing files
+    main(overwrite=False)
+
+    # Option B: copy only one experiment, keep existing files
+    # main(experiment="macro_var", overwrite=False)
+
+    # Option C: copy only one experiment, overwrite existing files inside it
+    # main(experiment="macro_var", overwrite=True)

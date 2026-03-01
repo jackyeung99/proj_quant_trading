@@ -88,7 +88,7 @@ class StoragePaths:
         return _p(self.results, f"experiment={_clean(exp)}")
 
     def runs_summary_key(self, exp: str) -> str:
-        return _p(self.experiment_root(exp), "runs.parquet")
+        return _p(self.experiment_root(exp), "runs_summary.parquet")
 
     def run_timeseries_key(self, exp: str, strategy: str, universe: str, run_id: str) -> str:
         base = PurePosixPath(self.experiment_root(exp)) / "timeseries"

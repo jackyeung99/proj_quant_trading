@@ -49,6 +49,25 @@ class StateSignalModel(Strategy):
             "w_high": self.w_high_,
             "state_var": self.state_var_
         }
+    
+    def get_persisted_series(self, *, test_inputs: ModelInputs, spec: RunSpec) -> pd.DataFrame:
+        p = self.parse_params(spec)
+        state_var = p["state_var"]
+
+        X = test_inputs.features.sort_index()
+        S = pd.to_numeric(X[state_var], errors="coerce")
+
+        # what you want to plot later
+        out = pd.DataFrame(
+            {
+                "state_value": S,
+                "signal": (S > float(self.tau_)).astype(float) if self.tau_ is not None else np.nan,
+                "tau_star": float(self.tau_) if self.tau_ is not None else np.nan,
+            },
+            index=test_inputs.ret.index,
+        )
+
+        return out
 
     def required_features(self, spec: RunSpec) -> list[str]:
         """
@@ -185,7 +204,7 @@ class StateSignalModel(Strategy):
             if np.isnan(sr_low) or np.isnan(sr_high):
                 continue
 
-            obj = abs(sr_high - sr_low)
+            obj = sr_high - sr_low
             if obj > best_obj:
                 best_obj = obj
                 best_tau = float(tau)
