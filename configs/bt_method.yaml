@@ -5,6 +5,7 @@ transaction_cost_bps: 0.0
 # --- evaluation method (optional WF) ---
 use_walk_forward: True
 train_size: 520      # ~2 trading year
-test_size: 21        # ~1 month
+test_size: 1        # ~1 month
+test_start_years: 3
 min_train: 400
 expanding: False

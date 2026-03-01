@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from qbt.core.types import RunSpec, RunMeta, RunResult, BacktestSpec, ModelInputs
+from qbt.storage.storage import Storage
 from qbt.metrics.summary import compute_metrics_simple
 from qbt.backtesting.splitter import iter_walk_forward_splits
 from qbt.execution.simulator import simulate_strategy_execution
@@ -49,57 +50,77 @@ def build_weights(
     strat: Strategy,
     spec: RunSpec,
     assets: list[str],
-    bt: BacktestSpec
-) -> pd.DataFrame:
+    bt: BacktestSpec,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
 
-    # ---- no walk-forward ----
-    if not bt.use_walk_forward:
-        strat.fit(inputs, spec)
-        w = strat.predict(inputs, spec)
-        return _normalize_weights_to_df(w, index=inputs.ret.index, assets=assets)
+    idx = inputs.ret.index
 
-    # ---- walk-forward ----
-    full_w = pd.DataFrame(0.0, index=inputs.ret.index, columns=assets)
+    full_w = pd.DataFrame(0.0, index=idx, columns=assets)
 
-    for train_idx, test_idx in iter_walk_forward_splits(inputs.ret.index, bt):
+    # this will store tau, w_low, w_high per time
+    model_state_df = pd.DataFrame(index=idx)
+
+    for train_idx, test_idx in iter_walk_forward_splits(idx, bt):
+
         train_inputs = ModelInputs(
             ret=inputs.ret.loc[train_idx],
             features=inputs.features.loc[train_idx],
         )
+
         test_inputs = ModelInputs(
             ret=inputs.ret.loc[test_idx],
             features=inputs.features.loc[test_idx],
         )
 
+        # ---- fit ----
         strat.fit(train_inputs, spec)
+
+        # ---- collect model state AFTER fit ----
+        state_dict = strat.get_model_state()
+
+        # expand learned params across test window
+        state_block = pd.DataFrame(
+            {k: state_dict.get(k) for k in state_dict},
+            index=test_idx,
+        )
+    
+        model_state_df = pd.concat([model_state_df, state_block], axis=0)
+
+        # ---- predict ----
         w_test = strat.predict(test_inputs, spec)
 
         full_w.loc[test_idx, :] = _normalize_weights_to_df(
-            w_test, index=test_inputs.ret.index, assets=assets
+            w_test,
+            index=test_inputs.ret.index,
+            assets=assets,
         )
+    
+    # ensure sorted index (important after concat)
+    model_state_df = model_state_df.sort_index()
 
-    return full_w
-
+    return full_w, model_state_df
 
 @dataclass
 class BacktestEngine:
-    data_adapter: DataAdapter = field(default_factory=DefaultDataAdapter)
+    storage: Storage
+    data_adapter: DataAdapter = field(init=False)
 
-    def run(self, spec: RunSpec, bt: BacktestSpec) -> RunResult:
+    def __post_init__(self) -> None:
+        self.data_adapter = DefaultDataAdapter(storage=self.storage)
+
+    def run(self, spec: "RunSpec", bt: "BacktestSpec") -> "RunResult":
         strat = create_strategy(spec.strategy_name)
 
         raw = self.data_adapter.load(spec)
-
         required_features = strat.required_features(spec)
 
         inputs: ModelInputs = self.data_adapter.prepare(
             raw, spec, required_cols=required_features
         )
-
-   
+        
         assets = list(inputs.ret.columns)
-   
-        w = build_weights(
+
+        w, state = build_weights(
             inputs=inputs,
             strat=strat,
             spec=spec,
@@ -107,16 +128,13 @@ class BacktestEngine:
             bt=bt,
         )
 
-     
         ts_df = simulate_strategy_execution(
             inputs.ret,
             w,
             weight_lag=bt.weight_lag,
             transaction_cost_bps=bt.transaction_cost_bps,
-            return_type='log'
-            # rebalance=bt.rebalance,
+            asset_return_type="log",
         )
-
 
         run_id = make_run_id(spec.strategy_name, spec.universe)
         meta = RunMeta(
@@ -124,7 +142,6 @@ class BacktestEngine:
             strategy_name=spec.strategy_name,
             universe=spec.universe,
             created_at_utc=datetime.now(timezone.utc).isoformat(),
-            # store the YAML blocks so you can reproduce runs exactly
             data_path=str(spec.data_path) or "",
             weight_lag=bt.weight_lag,
             params=spec.params or {},
@@ -133,4 +150,4 @@ class BacktestEngine:
 
         metrics = compute_metrics_simple(ts_df["port_ret_gross"])
         logging.info(metrics)
-        return RunResult(meta=meta, timeseries=ts_df, metrics=metrics)
+        return RunResult(meta=meta, timeseries=ts_df, metrics=metrics, model_state=state)

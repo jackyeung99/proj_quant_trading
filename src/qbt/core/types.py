@@ -52,6 +52,7 @@ class BacktestSpec:
     use_walk_forward: bool = False
     train_size: Optional[int] = None
     test_size: Optional[int] = None
+    test_start_years: Optional[int] = None
     expanding: bool = True
     min_train: Optional[int] = 200
 
@@ -69,8 +70,9 @@ class RunMeta:
 @dataclass
 class RunResult:
     meta: RunMeta
-    timeseries: pd.DataFrame  # indexed by date
+    timeseries: pd.DataFrame
     metrics: Dict[str, Any]
+    model_state: Dict[str, Any]  # learned/fitted outputs (tau*, weights, etc.)
 
 
 @dataclass

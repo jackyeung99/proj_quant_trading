@@ -201,7 +201,7 @@ def signal(
             "bundle_version": getattr(bundle, "version", "v1"),
             "market_tz": market_tz,
             "cutoff_hour": cutoff_hour,
-            "strategy_meta": strat.get_meta(),
+            "strategy_meta": strat.get_model_state(),
         }
 
         live_storage.write_model(

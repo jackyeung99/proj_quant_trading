@@ -42,7 +42,7 @@ class StateSignalModel(Strategy):
             "eps": float(params.get("eps", 1e-12)),
         }
     
-    def get_meta(self) -> dict:
+    def get_model_state(self) -> dict:
         return {
             "tau_star": self.tau_,
             "w_low": self.w_low_,

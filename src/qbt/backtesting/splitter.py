@@ -61,20 +61,6 @@ def iter_walk_forward_splits(
     index: pd.Index,
     bt: BacktestSpec,
 ) -> Iterator[Tuple[pd.Index, pd.Index]]:
-    """
-    Yield (train_index, test_index) splits over a time index.
-
-    Conventions (position-based slicing, end-exclusive):
-      - rolling (expanding=False):
-          train window length = train_size
-          step size = test_size
-      - expanding (expanding=True):
-          first train window length = train_size
-          then grows by test_size each split
-          step size = test_size
-
-    Stops when a full test window of length test_size cannot be formed.
-    """
     n = len(index)
     if n == 0:
         return
@@ -82,30 +68,50 @@ def iter_walk_forward_splits(
     train = _parse_size(bt.train_size, n, name="train_size", allow_none=False)
     test = _parse_size(bt.test_size, n, name="test_size", allow_none=False)
     min_train = _parse_size(bt.min_train, n, name="min_train", allow_none=True)
-
     if min_train is None:
         min_train = train
-
     if train <= 0 or test <= 0:
         return
 
-    # We advance by test window size (standard walk-forward CV)
     step = getattr(bt, "step_size", None)
     if step is None:
         step = test
     step = _parse_size(step, n, name="step_size", allow_none=False)
 
-    # Start with a training end at least min_train (and typically train)
+    # ----------------------------
+    # NEW: enforce test start >= index[0] + N years
+    # ----------------------------
     train_end = max(train, min_train)
 
-    # Safety: must be able to fit at least one test window
+    test_start_years = getattr(bt, "test_start_years", None)
+    if test_start_years is not None:
+        if not isinstance(index, pd.DatetimeIndex):
+            raise ValueError("test_start_years requires a DatetimeIndex.")
+        if index.tz is None:
+            # keep consistent with the rest of your pipeline assumptions
+            idx_dt = index.tz_localize("UTC")
+        else:
+            idx_dt = index
+
+        anchor = idx_dt[0] + pd.DateOffset(years=int(test_start_years))
+        # support fractional years approximately (optional)
+        frac = float(test_start_years) - int(test_start_years)
+        if frac != 0.0:
+            anchor = anchor + pd.Timedelta(days=365.25 * frac)
+
+        # find first position where index[pos] >= anchor
+        anchor_pos = int(idx_dt.searchsorted(anchor, side="left"))
+
+        # test window starts at train_end, so require train_end >= anchor_pos
+        train_end = max(train_end, anchor_pos)
+
+    # must be able to fit at least one test window
     if train_end + test > n:
         return
 
     while True:
         test_start = train_end
         test_end = test_start + test
-
         if test_end > n:
             break
 
@@ -114,7 +120,6 @@ def iter_walk_forward_splits(
         else:
             train_start = max(0, train_end - train)
 
-        
         yield index[train_start:train_end], index[test_start:test_end]
 
         train_end += step

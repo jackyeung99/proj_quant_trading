@@ -84,17 +84,14 @@ class StoragePaths:
     # ---------------------------------------------------------------------
     # Backtesting (global + per-run)
     # ---------------------------------------------------------------------
-    def runs_key(self) -> str:
-        return _p(self.results, "runs.parquet")
+    def experiment_root(self, exp: str) -> str:
+        return _p(self.results, f"experiment={_clean(exp)}")
 
-    def metrics_key(self) -> str:
-        return _p(self.results, "metrics.parquet")
+    def runs_key(self, exp: str) -> str:
+        return _p(self.experiment_root(exp), "runs.parquet")
 
-    def run_meta_key(self, run_id: str) -> str:
-        return _p(self.results, "runs", f"run_id={_clean(run_id)}", "meta.json")
-
-    def run_timeseries_key(self, strategy: str, universe: str, run_id: str) -> str:
-        base = PurePosixPath(self.results) / "timeseries"
+    def run_timeseries_key(self, exp: str, strategy: str, universe: str, run_id: str) -> str:
+        base = PurePosixPath(self.experiment_root(exp)) / "timeseries"
         p = (
             base
             / f"strategy={_clean(strategy)}"

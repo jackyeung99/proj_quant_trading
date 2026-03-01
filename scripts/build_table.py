@@ -64,7 +64,8 @@ def main():
     paths = StoragePaths()
     artifact_store = LiveStore(storage, paths)
 
-    # # ---- Run ingestion + silver ----
+
+
     # ingest_all_sources(storage=storage, paths=paths, ingestion_cfg=cfg['ingestion'], sources_cfg=cfg['sources'])
 
     # canonicalize_all(
@@ -73,11 +74,11 @@ def main():
     #     sources_cfg=cfg["sources"],
     # )
 
-    build_gold_model_table(
-        storage,
-        paths,
-        gold_cfg=cfg["gold"]['cfg'],
-        )
+    # build_gold_model_table(
+    #     storage,
+    #     paths,
+    #     gold_cfg=cfg["gold"]['cfg'],
+    #     )
 
     
 

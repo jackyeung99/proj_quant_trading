@@ -1,13 +1,15 @@
 import yaml
 from pathlib import Path
 from typing import Optional, Iterable, Dict, Any
+from itertools import product
 import copy
 
 from qbt.core.types import RunSpec, BacktestSpec
 from qbt.backtesting.engine import BacktestEngine
+from qbt.data.dataloader import DefaultDataAdapter
 from qbt.storage.storage import LocalStorage
 from qbt.storage.paths import StoragePaths
-from qbt.storage.artifacts import ArtifactsStore
+from qbt.storage.artifacts import BacktestStore
 from qbt.core.logging import setup_logging
 
 
@@ -28,58 +30,69 @@ def deep_update(d: dict, u: dict) -> dict:
     return out
 
 
-def run_spec(cfg: dict, bt_spec_df: dict, store: ArtifactsStore, bt: BacktestEngine) -> None:
-    spec = RunSpec(**cfg)
-    bt_spec = BacktestSpec(**bt_spec_df)
-
-
-    result = bt.run(spec, bt_spec)
-    store.write_run(result.meta, result.timeseries, result.metrics)
-    print("Wrote run:", result.meta.run_id, "|", spec.strategy_name, "|", spec.universe, "| tag:", spec.tag)
+def run_backtest(
+    *,
+    spec: RunSpec,
+    bt_spec: BacktestSpec,
+    engine: BacktestEngine,
+    artifact_store: BacktestStore,
+) -> None:
+    result = engine.run(spec, bt_spec)
+    # artifact_store.write_run(result.meta, result.timeseries, result.metrics)
+    # print(
+    #     "Wrote run:",
+    #     result.meta.run_id,
+    #     "|",
+    #     spec.strategy_name,
+    #     "|",
+    #     spec.universe,
+    #     "| tag:",
+    #     spec.tag,
+    # )
 
 
 def main():
     # --- storage ---
     storage = LocalStorage(base_dir=Path("."))
     paths = StoragePaths()
-    store = ArtifactsStore(storage, paths)
+    artifact_store = BacktestStore(storage, paths)
 
     # --- engine ---
-    bt = BacktestEngine()
+    bt = BacktestEngine(storage=storage)
 
     # --- backtesting settings ---
-    bt_cfg = load_yaml( "configs/bt_method.yaml")
+    bt_cfg = load_yaml("configs/bt_method.yaml")
+    bt_spec = BacktestSpec(**bt_cfg)
 
+    base_state = load_yaml("configs/strategies/run_state.yaml")['run']
+    base_state["data_path"] = "data/gold/freq=1D/tag=experiment/table.parquet"
 
-    # --- base configs (template YAMLs) ---
-    base_buyhold = load_yaml("configs/strategies/run_buyhold.yaml")
-    run_spec(base_buyhold, bt_cfg, store, bt)
+    state_vars = ["XLE_rvol", "DCOILWTICO", "DHHNGSP", "GASREGCOVW", "OVXCLS"]
+    weight_types = ["binary", "mean_var"]
 
+    for state_var, weight_type in product(state_vars, weight_types):
 
-    base_state = load_yaml("configs/strategies/run_state.yaml")
-    state_vars = [
-                "XLE_rvol", "XLE_garch_sigma_ann_next", "XLE_ewma_sigma_ann_next"
-                # "XLE_jump_var", "XLE_ewma_vol_20", "XLE_mom_20", "XLE_mom_60", "XLE_trend_slope_60", "XLE_pk_vol"
-                  ]
+        cfg = deep_update(
+            base_state,
+            {
+                "params": {
+                    "state_var": state_var,
+                    "weight_allocation": weight_type,
+                }
+            },
+        )
+
+        
+        spec = RunSpec(**cfg)
+
+        run_backtest(
+            spec=spec,
+            bt_spec=bt_spec,
+            engine=bt,
+            artifact_store=artifact_store,
+        )
+
     
-    cutoffs = ["data/gold/freq=1D/tag=trade-same-day-12/table.parquet", "data/gold/freq=1D/tag=trade-same-day-3/table.parquet", "data/gold/freq=1D/tag=trade-next-day/table.parquet"]
-    times = ["12 PM ET", "3PM ET", "9 AM ET Next Day"]
-
-    for cutoff_path, time  in zip(cutoffs, times):
-    
-        for sv in state_vars:
-            cfg = copy.deepcopy(base_state)
-
-            cfg["data_path"] = cutoff_path
-            cfg["params"]["state_var"] = sv
-
-            # NEW PARAM: you choose the param name your strategy/backtest reads
-            cfg["params"]["trade_time_et"] = time  # e.g., 3.0, 12.0, or None
-
-            # tag includes both cutoff + state var
-            cfg["tag"] = f"{cfg.get('tag','run')}_{time}_{sv}"
-
-            run_spec(cfg, bt_cfg, store, bt)
 
 
 
