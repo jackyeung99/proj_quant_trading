@@ -6,7 +6,7 @@ import pandas as pd
 from qbt.core.logging import get_logger
 from qbt.execution.alpaca_client import AlpacaTradingAPI
 from qbt.storage.artifacts import LiveStore
-from qbt.metrics.summary import compute_metrics_simple
+from qbt.metrics.summary import compute_portfolio_metrics
 from qbt.data.merge import join_daily, fill_in_force
 
 # NOTE: consider moving these into qbt.data.merge / qbt.utils.dates for reuse
@@ -213,7 +213,7 @@ def prep_gold_wide(
         return pd.DataFrame()
 
     df = gold.copy()
-
+    print(df)
     df[session_col] = pd.to_datetime(df[session_col], errors="coerce").dt.normalize()
     before = len(df)
     df = df.dropna(subset=[session_col, ticker_col])
@@ -371,10 +371,12 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
     gold = live_storage.storage.read_parquet(gold_path)
     logger.debug(_df_brief(gold, "gold_long"))
 
-    gold_wide = prep_gold_wide(
-        gold,
-        drop_cols={"open", "high", "low", "close", "volume"},
-    )
+    # gold_wide = prep_gold_wide(
+    #     gold,
+    #     drop_cols={"open", "high", "low", "close", "volume"},
+    # )
+
+    gold_wide = gold
     gold_wide = prep_state_ts(gold_wide)  # ensure session index if not already
     logger.info(_df_brief(gold_wide, "gold_wide"))
 
@@ -426,8 +428,16 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
     logger.info("evaluate_portfolio: computing returns + metrics")
     merged["strategy_ret"] = _equity_to_returns(merged, equity_col="portfolio_value")
 
+    
     ann_factor = int(execution_cfg.get("perf", {}).get("ann_factor", 252))
-    metrics = compute_metrics_simple(merged["strategy_ret"], ann_factor=ann_factor)
+    metrics = compute_portfolio_metrics(
+            merged,
+            col_gross='strategy_ret',
+            ann_factor=252,
+            return_type="simple",  # or "log" if needed
+            col_signal="signal",   # your 0/1 column
+            col_xle_weight='XLE_weight'
+        )
 
     logger.info("evaluate_portfolio: metrics computed (ann_factor=%d)", ann_factor)
     try:

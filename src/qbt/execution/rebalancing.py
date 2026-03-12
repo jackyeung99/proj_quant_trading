@@ -204,8 +204,7 @@ def _write_planned_orders(
     *,
     strat: str,
     universe: str,
-    orders: list[dict],
-    trade_dollars: pd.Series,
+    plan: RebalancePlan,
     equity: float,
     asof: str,
     run_id: str,
@@ -217,6 +216,8 @@ def _write_planned_orders(
 ) -> tuple[str, str, pd.DataFrame]:
     batch_id = uuid.uuid4().hex[:12]
     now_utc = pd.Timestamp.utcnow()
+
+    trade_dollars = plan.trade_shares * plan.prices
 
     orders_df = pd.DataFrame(
         [
@@ -230,7 +231,7 @@ def _write_planned_orders(
                 "asof": asof,
                 "symbol": o["symbol"],
                 "side": o["side"],
-                "notional": float(o["notional"]),
+                # "notional": float(o["notional"]),
                 "trade_dollars": float(trade_dollars.get(o["symbol"], float("nan"))),
                 "equity": float(equity),
                 "dry_run": bool(dry_run),
@@ -238,7 +239,7 @@ def _write_planned_orders(
                 "holding_period_mode": hp_mode if hp_enabled else "",
                 "holding_period_tif": hp_tif if hp_enabled else "",
             }
-            for o in orders
+            for o in plan.orders
         ]
     )
 

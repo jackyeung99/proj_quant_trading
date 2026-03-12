@@ -36,6 +36,7 @@ class StateSignalModel(Strategy):
             "min_frac": float(params.get("min_frac", 0.10)),
             "ann_factor": int(params.get("ann_factor", 252)),
             "gamma": float(params.get("gamma", 5.0)),
+            "n_grid": int(params.get("n_grid", 100)),
             "weight_type": str(params.get('weight_allocation', 'binary')),
             "w_min": float(params.get("w_min", 0.0)),
             "w_max": float(params.get("w_high", 1.0)),
@@ -61,8 +62,10 @@ class StateSignalModel(Strategy):
         out = pd.DataFrame(
             {
                 "state_value": S,
-                "signal": (S > float(self.tau_)).astype(float) if self.tau_ is not None else np.nan,
+                "signal": (S < float(self.tau_)).astype(float) if self.tau_ is not None else np.nan,
                 "tau_star": float(self.tau_) if self.tau_ is not None else np.nan,
+                "w_low": self.w_low_,
+                "w_high": self.w_high_,
             },
             index=test_inputs.ret.index,
         )
@@ -104,6 +107,7 @@ class StateSignalModel(Strategy):
             return_col="ret",
             min_frac=p["min_frac"],
             ann_factor=p["ann_factor"],
+            n_grid=p["n_grid"]
         )
 
         if tau is None or np.isnan(tau):
@@ -116,9 +120,10 @@ class StateSignalModel(Strategy):
                 state_var="S_used",
                 return_col="ret",
                 tau=float(tau),
+                n_grid=p["n_grid"],
                 gamma=p["gamma"],
-                w_min=p["w_min"],
-                w_max=p["w_max"],
+                w_lo=p["w_min"],
+                w_hi=p["w_max"],
                 eps=p["eps"],
             )
         else:
@@ -218,24 +223,48 @@ class StateSignalModel(Strategy):
         return_col: str,
         tau: float,
         gamma: float = 5.0,
-        w_min: float = 0.0,
-        w_max: float = 3.0,
+        *,
+        # grid controls
+        w_lo: float = 0.0,
+        w_hi: float = 1.0,
+        n_grid: int = 100,
+        # safety / stats controls
+        min_n: int = 5,
         eps: float = 1e-12,
+        ddof: int = 1,
     ) -> tuple[float, float]:
-        s = df_train[state_var]
-        r = df_train[return_col]
+        """
+        Choose (w_low, w_high) via linear scan over weights.
+
+        Objective (mean-variance utility):
+            U(w) = w*mu - 0.5*gamma*(w^2)*var
+
+        Returns:
+            (best_w_low, best_w_high)
+        """
+        s = pd.to_numeric(df_train[state_var], errors="coerce")
+        r = pd.to_numeric(df_train[return_col], errors="coerce")
 
         low = r[s <= tau].dropna()
         high = r[s > tau].dropna()
 
-        def mv_weight(x: pd.Series) -> float:
-            if len(x) < 5:
-                return float(np.clip(0.0, w_min, w_max))
-            mu = float(x.mean())
-            var = float(x.var(ddof=1))
-            if not np.isfinite(var) or var < eps:
-                return float(np.clip(0.0, w_min, w_max))
-            w = mu / (gamma * var)
-            return float(np.clip(w, w_min, w_max))
+        grid = np.linspace(float(w_lo), float(w_hi), int(n_grid))
 
-        return mv_weight(low), mv_weight(high)
+        def best_w(x: pd.Series) -> float:
+            if len(x) < min_n:
+                return float(w_lo)
+
+            mu = float(x.mean())
+            var = float(x.var(ddof=ddof))
+
+            # If var is tiny/invalid, utility is ~ linear in w: pick endpoint based on sign(mu)
+            if (not np.isfinite(var)) or var < eps:
+                return float(w_hi if mu > 0 else w_lo)
+
+            # Vectorized utility over grid
+            # U(w) = w*mu - 0.5*gamma*w^2*var
+            U = grid * mu - 0.5 * float(gamma) * (grid ** 2) * var
+            j = int(np.nanargmax(U))
+            return float(grid[j])
+
+        return best_w(low), best_w(high)

@@ -1,7 +1,0 @@
-strategy_name: BuyHold
-universe: XLE
-
-assets:
-  - XLE
-
-data_path: 'data/gold/freq=1D/tag=trade-next-day/table.parquet'

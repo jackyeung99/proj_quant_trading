@@ -242,6 +242,7 @@ def execute_weights(live_storage: LiveStore, execution_cfg: dict) -> dict:
 
         logger.info(f"Plan built | n_orders={len(plan.orders)} gross_notional={float(plan.gross_notional):.2f}")
 
+
         # --------------------------------------------------------------
         # 4) Persist planned orders
         # --------------------------------------------------------------

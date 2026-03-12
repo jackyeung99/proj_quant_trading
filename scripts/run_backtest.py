@@ -10,6 +10,7 @@ from qbt.data.dataloader import DefaultDataAdapter
 from qbt.storage.storage import LocalStorage
 from qbt.storage.paths import StoragePaths
 from qbt.storage.artifacts import BacktestStore
+
 from qbt.core.logging import setup_logging
 
 
@@ -49,6 +50,8 @@ def run_backtest(
         spec.universe,
         "| tag:",
         spec.tag,
+        "| Sharpe:", 
+        result.metrics['gross_sharpe']
     )
 
 
@@ -71,16 +74,20 @@ def main():
 
     state_vars = ["XLE_rvol", "DCOILWTICO", "DHHNGSP", "GASREGCOVW", "OVXCLS"]
     weight_types = ["binary", "mean_var"]
+    gamma_types = [1, 5, 10]
+    min_frac = [0, 0.05, .1, .15]
 
-    for state_var, weight_type in product(state_vars, weight_types):
+    for state_var, weight_type, gamma, outlier_cap in product(state_vars, weight_types, gamma_types, min_frac):
             
         cfg = deep_update(
             base_state,
             {
-                "params": {
+                "params": { 
+                    "min_frac": outlier_cap,
                     "state_var": state_var,
                     "weight_allocation": weight_type,
-                }
+                    "gamma": gamma
+                }   
             },
         )
 

@@ -9,7 +9,7 @@ import numpy as np
 
 from qbt.core.types import RunSpec, RunMeta, RunResult, BacktestSpec, ModelInputs
 from qbt.storage.storage import Storage
-from qbt.metrics.summary import compute_metrics_simple
+from qbt.metrics.summary import compute_portfolio_metrics
 from qbt.backtesting.splitter import iter_walk_forward_splits
 from qbt.execution.simulator import simulate_strategy_execution
 from qbt.data.dataloader import DataAdapter, DefaultDataAdapter
@@ -45,43 +45,6 @@ def _normalize_weights_to_df(
 
     return w_df.reindex(index=index).reindex(columns=assets).fillna(0.0)
 
-
-# def build_weights(
-#     inputs: ModelInputs,
-#     strat: Strategy,
-#     spec: RunSpec,
-#     assets: list[str],
-#     bt: BacktestSpec,
-# ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
-#     idx = inputs.ret.index
-
-#     full_w = pd.DataFrame(np.nan, index=idx, columns=assets)     # NaN outside test
-#     test_mask = pd.Series(False, index=idx)
-
-#     state_blocks = []  # collect blocks; concat once
-
-#     for train_idx, test_idx in iter_walk_forward_splits(idx, bt):
-#         train_inputs = ModelInputs(ret=inputs.ret.loc[train_idx],
-#                                    features=inputs.features.loc[train_idx])
-#         test_inputs  = ModelInputs(ret=inputs.ret.loc[test_idx],
-#                                    features=inputs.features.loc[test_idx])
-
-#         strat.fit(train_inputs, spec)
-#         state_dict = strat.get_model_state()
-
-#         # broadcast model state over the test window
-#         state_blocks.append(pd.DataFrame(state_dict, index=test_idx))
-
-#         w_test = strat.predict(test_inputs, spec)
-#         full_w.loc[test_idx, :] = _normalize_weights_to_df(
-#             w_test, index=test_inputs.ret.index, assets=assets
-#         )
-
-#         test_mask.loc[test_idx] = True
-
-#     model_state_df = pd.concat(state_blocks).sort_index() if state_blocks else pd.DataFrame(index=idx)
-
-#     return full_w, model_state_df, test_mask
 
 def build_weights(
     inputs: ModelInputs,
@@ -169,7 +132,11 @@ class BacktestEngine:
             tag=spec.tag,
         )
 
-        metrics = compute_metrics_simple(ts_df["port_ret_gross"])
-        logging.info(metrics)
+        metrics = compute_portfolio_metrics(
+            ts_df,
+            ann_factor=252,
+            return_type="simple",  # or "log" if needed
+            col_signal="signal",   # your 0/1 column
+        )
 
         return RunResult(meta=meta, timeseries=ts_df, metrics=metrics, model_state=state_test)

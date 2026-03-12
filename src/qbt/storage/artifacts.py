@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional, List
 import pandas as pd
 import json
 import re
-
+import numpy as np
 from qbt.core.logging import get_logger
 
 from qbt.core.exceptions import StorageError
@@ -20,7 +20,7 @@ _REQUIRED_TS_COLS = ["port_ret_gross", "port_ret_net", "equity_gross", "equity_n
 
 
 
-def _flatten_dict(d: dict, *, prefix: str = "", sep: str = "__") -> dict:
+def _flatten_dict(d: dict, *, prefix: str = "", sep: str = "_") -> dict:
     """Flatten nested dicts into columns: params__foo__bar."""
     out: dict[str, Any] = {}
     for k, v in (d or {}).items():
@@ -113,14 +113,14 @@ class BacktestStore:
 
         # merge metrics into same row
         for k, v in (metrics or {}).items():
-            row[f"metric__{k}"] = v
+            row[f"metric_{k}"] = v
 
         # optional: store fitted summary (last tau, etc) if present
         if include_model_state_summary:
             for col in ("tau_star", "w_low", "w_high"):
                 if col in timeseries.columns:
                     s = pd.to_numeric(timeseries[col], errors="coerce").dropna()
-                    row[f"model__{col}_final"] = float(s.iloc[-1]) if not s.empty else np.nan
+                    row[f"model_{col}_final"] = float(s.iloc[-1]) if not s.empty else np.nan
 
         # upsert into summary parquet
         summary_df = (
