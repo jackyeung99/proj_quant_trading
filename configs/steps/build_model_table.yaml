@@ -39,4 +39,10 @@ daily_transforms:
     kind: log
     mode: o2c
 
+  # - name: parkinson_vol
+
+  # - name: momentum
+  #   windows: [20, 60]
+
+
   

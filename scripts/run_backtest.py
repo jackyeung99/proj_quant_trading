@@ -51,7 +51,7 @@ def run_backtest(
         "| tag:",
         spec.tag,
         "| Sharpe:", 
-        result.metrics['gross_sharpe']
+        round(result.metrics['gross_sharpe'], 3)
     )
 
 
@@ -72,34 +72,40 @@ def main():
     base_state = load_yaml("configs/strategies/run_state.yaml")['run']
     base_state["data_path"] = "data/gold/freq=1D/tag=experiment/table.parquet"
 
-    state_vars = ["XLE_rvol", "DCOILWTICO", "DHHNGSP", "GASREGCOVW", "OVXCLS"]
-    weight_types = ["binary", "mean_var"]
-    gamma_types = [1, 5, 10]
+    state_vars = ["XLE_rvol"]
     min_frac = [0, 0.05, .1, .15]
 
-    for state_var, weight_type, gamma, outlier_cap in product(state_vars, weight_types, gamma_types, min_frac):
-            
+    for state_var, outlier_cap in product(state_vars, min_frac):
         cfg = deep_update(
             base_state,
             {
-                "params": { 
+                "params": {
                     "min_frac": outlier_cap,
                     "state_var": state_var,
-                    "weight_allocation": weight_type,
-                    "gamma": gamma
-                }   
+                    "weight_allocation": "binary",
+                }
             },
         )
 
-        
         spec = RunSpec(**cfg)
+        run_backtest(spec=spec, bt_spec=bt_spec, engine=bt, artifact_store=artifact_store)
 
-        run_backtest(
-            spec=spec,
-            bt_spec=bt_spec,
-            engine=bt,
-            artifact_store=artifact_store,
+    # mean_var runs
+    for state_var, gamma, outlier_cap in product(state_vars, [1, 5, 10], min_frac):
+        cfg = deep_update(
+            base_state,
+            {
+                "params": {
+                    "min_frac": outlier_cap,
+                    "state_var": state_var,
+                    "weight_allocation": "mean_var",
+                    "gamma": gamma,
+                }
+            },
         )
+
+        spec = RunSpec(**cfg)
+        run_backtest(spec=spec, bt_spec=bt_spec, engine=bt, artifact_store=artifact_store)
 
     
 

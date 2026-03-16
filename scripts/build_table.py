@@ -74,11 +74,11 @@ def main():
     #     sources_cfg=cfg["sources"],
     # )
 
-    # build_gold_model_table(
-    #     storage,
-    #     paths,
-    #     gold_cfg=cfg["gold"]['cfg'],
-    #     )
+    build_gold_model_table(
+        storage,
+        paths,
+        gold_cfg=cfg["gold"]['cfg'],
+        )
 
     
 

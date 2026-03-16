@@ -243,6 +243,7 @@ def _write_planned_orders(
         ]
     )
 
+
     orders_key = storage.write_orders_batch(
         strategy=strat,
         universe=universe,

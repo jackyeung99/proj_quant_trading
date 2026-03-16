@@ -14,6 +14,7 @@ run:
     w_min: 0
     w_max: 1.0
     weight_allocation: 'mean_var'
+    gamma: 5.0
 
 
 live:
