@@ -16,7 +16,7 @@ equities_intraday_15m:
 equities_intraday_5m:
   enabled: True
   provider: alpaca
-  symbols: ["XLE",]
+  symbols: ["SPY", "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLRE", "XLK", "XLU"]
   interval: "5Min"
   feed: "iex"
   adjustment: "all"

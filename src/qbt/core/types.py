@@ -77,8 +77,9 @@ class RunResult:
 
 @dataclass
 class ModelInputs:
-    ret: pd.DataFrame
-    features: pd.DataFrame
+    ret: pd.DataFrame                         # [time × asset]
+    asset_features: dict[str, pd.DataFrame]   # per-feature wide
+    global_features: Optional[pd.DataFrame] = None   # global (optional)
 
 
 @dataclass(frozen=True)
@@ -92,35 +93,4 @@ class Position:
     cost_basis: float      # dollars
     unrealized_pl: float   # dollars
     unrealized_plpc: float # fraction, e.g. 0.12
-
-# # ---------- Step specs ----------
-
-# @dataclass(frozen=True)
-# class IngestionSpec:
-#     source: str                    # "alpaca", "polygon", "local_parquet", ...
-#     raw_freq: str                  # "1Min", "5Min", etc
-#     start: Optional[str] = None    # ISO date/time, optional
-#     end: Optional[str] = None      # ISO date/time, optional
-#     lookback_days: Optional[int] = None
-#     extra: Dict[str, Any] = field(default_factory=dict)
-
-
-# @dataclass(frozen=True)
-# class ModelTableSpec:
-#     # what you want to build
-#     target_freq: str = "1D"        # daily targets even if raw is intraday
-#     rv_freq: Optional[str] = None  # if you compute RV from intraday, ex "5Min"
-#     cutoff_time: str = "16:00"     # cutoff defining "day" bucket
-#     horizon: int = 1               # prediction horizon in bars at target_freq
-#     features: Dict[str, Any] = field(default_factory=dict)
-#     required_cols: list[str] = field(default_factory=list)
-
-# @dataclass(frozen=True)
-# class SignalSpec:
-#     retrain_freq: str = "1D"
-#     train_lookback_bars: int = 502
-#     min_train_bars: int = 200
-#     model_key_prefix: str = "models/"
-#     meta_key_prefix: str = "models_meta/"
-#     extra: Dict[str, Any] = field(default_factory=dict)
 

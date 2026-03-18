@@ -12,7 +12,7 @@ from qbt.storage.storage import Storage
 from qbt.metrics.summary import compute_portfolio_metrics
 from qbt.backtesting.splitter import iter_walk_forward_splits
 from qbt.execution.simulator import simulate_strategy_execution
-from qbt.data.dataloader import DataAdapter, DefaultDataAdapter
+from qbt.data.dataloader import DataAdapter, WidePrefixDataAdapter
 
 from qbt.strategies.strategy_registry import create_strategy, available_strategies
 from qbt.strategies.strategy_base import Strategy
@@ -52,32 +52,47 @@ def build_weights(
     spec: RunSpec,
     assets: list[str],
     bt: BacktestSpec,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     idx = inputs.ret.index
 
     full_w = pd.DataFrame(np.nan, index=idx, columns=assets)
-
     test_mask = pd.Series(False, index=idx)
-    extra_blocks = []  # strategy-provided series for each test window
+    extra_blocks: list[pd.DataFrame] = []
 
     for train_idx, test_idx in iter_walk_forward_splits(idx, bt):
-        train_inputs = ModelInputs(ret=inputs.ret.loc[train_idx], features=inputs.features.loc[train_idx])
-        test_inputs  = ModelInputs(ret=inputs.ret.loc[test_idx],  features=inputs.features.loc[test_idx])
+        train_inputs = ModelInputs(
+            ret=inputs.ret.loc[train_idx, assets],
+            asset_features={
+                name: panel.loc[train_idx, assets]
+                for name, panel in inputs.asset_features.items()
+            },
+            global_features=inputs.global_features.loc[train_idx],
+        )
+
+        test_inputs = ModelInputs(
+            ret=inputs.ret.loc[test_idx, assets],
+            asset_features={
+                name: panel.loc[test_idx, assets]
+                for name, panel in inputs.asset_features.items()
+            },
+            global_features=inputs.global_features.loc[test_idx],
+        )
 
         strat.fit(train_inputs, spec)
 
-        # weights
         w_test = strat.predict(test_inputs, spec)
-        full_w.loc[test_idx, :] = _normalize_weights_to_df(w_test, index=test_inputs.ret.index, assets=assets)
+        full_w.loc[test_idx, assets] = _normalize_weights_to_df(
+            w_test,
+            index=test_inputs.ret.index,
+            assets=assets,
+        )
 
-        # extra time series to persist (state_value, signal, tau_star, etc.)
         extra = strat.get_persisted_series(test_inputs=test_inputs, spec=spec)
         if extra is not None and not extra.empty:
             extra_blocks.append(extra.reindex(test_inputs.ret.index))
 
         test_mask.loc[test_idx] = True
 
-    # concat once
     extra_df = pd.concat(extra_blocks).sort_index() if extra_blocks else pd.DataFrame(index=idx)
 
     return full_w, extra_df, test_mask
@@ -88,17 +103,27 @@ class BacktestEngine:
     data_adapter: DataAdapter = field(init=False)
 
     def __post_init__(self) -> None:
-        self.data_adapter = DefaultDataAdapter(storage=self.storage)
+        self.data_adapter = WidePrefixDataAdapter(storage=self.storage)
 
     def run(self, spec: RunSpec, bt: BacktestSpec) -> RunResult:
         strat = create_strategy(spec.strategy_name)
 
         raw = self.data_adapter.load(spec)
-        required_features = strat.required_features(spec)
-        inputs: ModelInputs = self.data_adapter.prepare(raw, spec, required_cols=required_features)
 
-        assets = list(inputs.ret.columns)
+      
+        asset_features = strat.required_asset_features(spec)
+        global_features = strat.required_global_features(spec)
 
+        assets = spec.assets
+        inputs = self.data_adapter.prepare(
+            raw=raw,
+            spec=spec,
+            assets=spec.assets,
+            required_asset_features=asset_features,
+            required_global_features=global_features,
+        )
+
+        print(inputs)
         w_full, state_full, test_mask = build_weights(
             inputs=inputs, strat=strat, spec=spec, assets=assets, bt=bt
         )

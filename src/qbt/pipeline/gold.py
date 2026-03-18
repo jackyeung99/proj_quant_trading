@@ -120,8 +120,8 @@ def merge_daily_sources(
     # shift by 1 day to avoid look-ahead
     daily = (
         daily.sort_values(["ticker", "session_date"])
-             .groupby("ticker", as_index=False)
-             .apply(lambda g: g.shift(1))
+            #  .groupby("ticker", as_index=False)
+            #  .apply(lambda g: g.shift(1))
              .reset_index(drop=True)
              .dropna()
     )

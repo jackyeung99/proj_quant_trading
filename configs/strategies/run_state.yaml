@@ -3,13 +3,13 @@ run:
   universe: XLE
   tag: rv_regime_5m
 
-  assets:
-    - XLE
+  assets: ['XLE']
+  
 
   data_path: 'data/gold/freq=1D/tag=model_ready/table.parquet'
 
   params:
-    state_var: XLE_rvol
+    state_var: rvol
     min_frac: 0.05
     w_min: 0
     w_max: 1.0

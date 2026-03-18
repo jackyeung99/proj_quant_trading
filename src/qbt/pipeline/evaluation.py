@@ -213,7 +213,7 @@ def prep_gold_wide(
         return pd.DataFrame()
 
     df = gold.copy()
-    print(df)
+
     df[session_col] = pd.to_datetime(df[session_col], errors="coerce").dt.normalize()
     before = len(df)
     df = df.dropna(subset=[session_col, ticker_col])

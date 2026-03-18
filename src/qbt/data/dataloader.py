@@ -16,244 +16,254 @@ class DataAdapter:
 
 
 @dataclass
-class DefaultDataAdapter(DataAdapter):
+class WidePrefixDataAdapter(DataAdapter):
     """
-    Assumes the input is a persisted LONG modeling table (gold) with columns:
-      - date or timestamp
-      - asset
-      - return column (ret_oo preferred, else ret_cc)
-      - feature columns
+    Assumes a wide modeling table with columns like:
+      - session_date / timestamp / date
+      - XLE_ret_cc, XLK_ret_cc, ...
+      - XLE_rvol_20, XLK_rvol_20, ...
+      - OVX, DGS10, TBILL_3M, ...   # global features
 
-    load()   -> returns the LONG modeling table (DataFrame)
-    prepare() -> returns ModelInputs with wide ret + wide features
+    Returns:
+      ModelInputs(
+          ret=<wide return matrix indexed by time, columns=asset>,
+          asset_features={
+              "rvol_20": <wide panel indexed by time, columns=asset>,
+              "mom_60": <wide panel indexed by time, columns=asset>,
+          },
+          global_features=<df indexed by time with macro/global cols>
+      )
     """
-    def __init__(self, storage: Storage):
-        self.storage = storage
+    storage: Storage
+    default_time_candidates: Sequence[str] = ("session_date", "timestamp", "date", "time")
+    default_ret_suffixes: Sequence[str] = ("ret_cc",)
+    assume_naive_tz: str = "UTC"
 
     def load(self, spec: RunSpec) -> pd.DataFrame:
         data_path = spec.data_path
         if not data_path:
-            raise ValueError("spec.data_path must point to modeling table (key for S3, or local path).")
+            raise ValueError("spec.data_path must be set.")
 
-        # If your pipeline uses Storage, treat data_path as a storage key (relative)
         key = str(data_path).lstrip("/")
-
-        # Use storage exists/read (works for local and s3 backends)
         if not self.storage.exists(key):
-            raise FileNotFoundError(f"Modeling table not found in storage at key: {key}")
+            raise FileNotFoundError(f"Modeling table not found: {key}")
 
-        # infer format from suffix
         suffix = Path(key).suffix.lower()
         if suffix == ".parquet":
             return self.storage.read_parquet(key)
         if suffix == ".csv":
-            return self.storage.read_csv(key)  # implement if you need it
+            return self.storage.read_csv(key)
 
-        raise ValueError(f"Could not infer file format from suffix: {suffix}")
-
-    # def prepare(
-    #     self,
-    #     raw: pd.DataFrame,
-    #     spec: "RunSpec",
-    #     required_cols: list[str],
-    #     *,
-    #     time_col: Optional[str] = None,          # e.g. "session_date" or "timestamp"
-    #     ret_candidates: Sequence[str] = ("ret_oo", "ret_cc"),
-    #     assume_naive_tz: str = "UTC",
-    #     drop_value_cols: Sequence[str] = (),     # extra columns to exclude from features
-    # ) -> "ModelInputs":
-    #     """
-    #     raw: WIDE gold table.
-
-    #     Accepted wide schemas:
-    #     A) MultiIndex columns: (asset, field)
-    #         - Example columns: ("XLE", "rv"), ("XLE", "ret_cc"), ("SPY", "rv"), ...
-    #         - Index: DatetimeIndex (session_date)
-
-    #     B) Flattened columns: "<asset>_<field>"
-    #         - Example columns: "XLE_rv", "XLE_ret_cc", "SPY_rv", ... 
-    #         - Index: DatetimeIndex (session_date)
-
-    #     Output:
-    #     - ret: wide (index=time, columns=assets)
-    #     - features: wide flattened (index=time, columns="<asset>_<feature>")
-    #     """
-    #     df = raw.copy()
-
-    #     # ----------------------------
-    #     # 0) Resolve / normalize time index
-    #     # ----------------------------
-    #     if time_col is None:
-    #         # prefer index if datetime
-    #         if isinstance(df.index, pd.DatetimeIndex):
-    #             pass
-    #         else:
-    #             # otherwise look for a time column
-    #             time_col = next((c for c in ("session_date", "timestamp", "date", "time") if c in df.columns), None)
-
-    #     if time_col is not None:
-    #         df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
-    #         df = df.dropna(subset=[time_col]).set_index(time_col)
-
-    #     if not isinstance(df.index, pd.DatetimeIndex):
-    #         raise ValueError("Expected a DatetimeIndex or a time column like 'session_date'/'timestamp'.")
-
-    #     # timezone normalize
-    #     if df.index.tz is None:
-    #         df.index = df.index.tz_localize(assume_naive_tz)
-    #     else:
-    #         df.index = df.index.tz_convert("UTC")
-
-    #     df = df.sort_index()
-        
-    #     # ----------------------------
-    #     # 1) Coerce to canonical wide: MultiIndex (asset, field)
-    #     # ----------------------------
-    #     if isinstance(df.columns, pd.MultiIndex):
-    #         if df.columns.nlevels != 2:
-    #             raise ValueError(f"Expected 2-level MultiIndex columns (asset, field). Got nlevels={df.columns.nlevels}")
-    #         wide = df.copy()
-    #         wide.columns = pd.MultiIndex.from_tuples([(str(a), str(f)) for a, f in wide.columns], names=["asset", "field"])
-    #     else:
-    #         # Flattened "<asset>_<field>" → MultiIndex
-    #         cols = [str(c) for c in df.columns]
-    #         pairs = []
-    #         bad = []
-    #         for c in cols:
-    #             if "_" not in c:
-    #                 bad.append(c)
-    #                 continue
-    #             a, f = c.split("_", 1)
-    #             pairs.append((a, f))
-    #         if bad:
-    #             raise ValueError(
-    #                 "Wide table has non-MultiIndex columns but some columns are not '<asset>_<field>'. "
-    #                 f"Examples: {bad[:10]}"
-    #             )
-    #         wide = df.copy()
-    #         wide.columns = pd.MultiIndex.from_tuples(pairs, names=["asset", "field"])
-
-    #     wide = wide.sort_index().sort_index(axis=1)
-
-    #     # ----------------------------
-    #     # 2) Pick return stream from candidates
-    #     # ----------------------------
-    #     fields = set(wide.columns.get_level_values("field"))
-    #     ret_field = next((f for f in ret_candidates if f in fields), None)
-    #     if ret_field is None:
-    #         raise ValueError(
-    #             f"Missing return field: expected one of {list(ret_candidates)}. "
-    #             f"Fields available (sample): {sorted(list(fields))[:30]}"
-    #         )
-
-    #     ret_wide = wide.xs(ret_field, level="field", axis=1).sort_index(axis=1)
-
-    #     # ----------------------------
-    #     # 3) Features: flatten "<asset>_<field>" and drop returns
-    #     # ----------------------------
-    #     X = wide.copy()
-    #     X.columns = [f"{a}_{f}" for a, f in X.columns]
-
-    #     # drop all return candidates + any extra requested drops (exact names)
-    #     drop_suffixes = tuple(f"_{f}" for f in ret_candidates)
-    #     drop_cols = [c for c in X.columns if c.endswith(drop_suffixes)]
-    #     drop_cols += [c for c in drop_value_cols if c in X.columns]
-    #     if drop_cols:
-    #         X = X.drop(columns=sorted(set(drop_cols)))
-
-    #     # ----------------------------
-    #     # 4) Required columns check
-    #     # ----------------------------
-    #     if required_cols:
-    #         missing = [c for c in required_cols if c not in X.columns]
-    #         if missing:
-    #             raise ValueError(
-    #                 f"Missing required feature columns: {missing}\n"
-    #                 f"Available (sample): {list(X.columns)[:30]}"
-    #             )
-
-    #     # ----------------------------
-    #     # 5) Align + basic cleanup
-    #     # ----------------------------
-    #     idx = ret_wide.index.intersection(X.index)
-    #     ret_wide = ret_wide.loc[idx].dropna(how="all")
-    #     X = X.loc[ret_wide.index]
-
-    #     return ModelInputs(ret=ret_wide, features=X)
-
+        raise ValueError(f"Unsupported file format: {suffix}")
 
     def prepare(
         self,
         raw: pd.DataFrame,
-        spec: "RunSpec",
-        required_cols: list[str],
+        spec: RunSpec,
+        required_asset_features: Sequence[str],
+        required_global_features: Sequence[str] = (),
         *,
         time_col: Optional[str] = None,
-        ret_candidates: Sequence[str] = ("XLE_ret_oo", "XLE_ret_cc"),
-        assume_naive_tz: str = "UTC",
+        ret_suffixes: Optional[Sequence[str]] = None,
         drop_value_cols: Sequence[str] = (),
-    ) -> "ModelInputs":
-
+        assets: Optional[Sequence[str]] = None,
+    ) -> ModelInputs:
         df = raw.copy()
+        df = self._normalize_time_index(df, time_col=time_col)
 
-        # ----------------------------
-        # 1) Time handling
-        # ----------------------------
-        if time_col is None:
-            if not isinstance(df.index, pd.DatetimeIndex):
-                time_col = next(
-                    (c for c in ("session_date", "timestamp", "date", "time") if c in df.columns),
-                    None,
-                )
+        resolved_assets = self._resolve_assets(spec=spec, assets=assets)
+
+        ret_wide, ret_cols = self._extract_returns_wide(
+            df,
+            ret_suffixes=ret_suffixes or self.default_ret_suffixes,
+            assets=resolved_assets,
+        )
+
+        asset_features, used_asset_feature_cols = self._extract_asset_features(
+            df,
+            required_asset_features=required_asset_features,
+            assets=list(ret_wide.columns),
+        )
+
+        global_features = self._extract_global_features(
+            df,
+            required_global_features=required_global_features,
+            exclude_cols=set(ret_cols) | set(used_asset_feature_cols) | set(drop_value_cols),
+        )
+
+        ret_wide, asset_features, global_features = self._align_all(
+            ret_wide=ret_wide,
+            asset_features=asset_features,
+            global_features=global_features,
+        )
+
+        return ModelInputs(
+            ret=ret_wide,
+            asset_features=asset_features,
+            global_features=global_features,
+        )
+
+    def _resolve_assets(
+        self,
+        *,
+        spec: RunSpec,
+        assets: Optional[Sequence[str]],
+    ) -> Optional[list[str]]:
+        if assets is not None:
+            resolved = list(assets)
+        else:
+            universe = getattr(spec, "universe", None)
+            if universe is None:
+                return None
+            if isinstance(universe, str):
+                resolved = [universe]
+            else:
+                resolved = list(universe)
+
+        resolved = [a for a in resolved if a is not None and str(a) != ""]
+        if not resolved:
+            return None
+
+        return resolved
+
+    def _normalize_time_index(
+        self,
+        df: pd.DataFrame,
+        *,
+        time_col: Optional[str],
+    ) -> pd.DataFrame:
+        out = df.copy()
+
+        if time_col is None and not isinstance(out.index, pd.DatetimeIndex):
+            time_col = next((c for c in self.default_time_candidates if c in out.columns), None)
 
         if time_col is not None:
-            df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
-            df = df.dropna(subset=[time_col]).set_index(time_col)
+            out[time_col] = pd.to_datetime(out[time_col], errors="coerce")
+            out = out.dropna(subset=[time_col]).set_index(time_col)
 
-        if not isinstance(df.index, pd.DatetimeIndex):
-            raise ValueError("Expected DatetimeIndex or valid time column.")
+        if not isinstance(out.index, pd.DatetimeIndex):
+            raise ValueError("Expected DatetimeIndex or a valid time column.")
 
-        # timezone normalize
-        if df.index.tz is None:
-            df.index = df.index.tz_localize(assume_naive_tz)
+        if out.index.tz is None:
+            out.index = out.index.tz_localize(self.assume_naive_tz)
         else:
-            df.index = df.index.tz_convert("UTC")
+            out.index = out.index.tz_convert("UTC")
 
-        df = df.sort_index()
+        return out.sort_index()
 
-        # ----------------------------
-        # 2) Extract returns
-        # ----------------------------
-        ret_col = next((c for c in ret_candidates if c in df.columns), None)
-        if ret_col is None:
-            raise ValueError(f"No return column found among {ret_candidates}")
+    def _extract_returns_wide(
+        self,
+        df: pd.DataFrame,
+        *,
+        ret_suffixes: Sequence[str],
+        assets: Optional[Sequence[str]] = None,
+    ) -> tuple[pd.DataFrame, list[str]]:
+        suffixes = tuple(ret_suffixes)
+        ret_cols = [c for c in df.columns if c.endswith(suffixes)]
 
-        asset = ret_col.split("_")[0]
+        if not ret_cols:
+            raise ValueError(
+                f"No return columns found using suffixes={list(ret_suffixes)}. "
+                f"Sample columns: {list(df.columns)[:20]}"
+            )
 
-        ret_wide = df[[ret_col]].rename(columns={ret_col: asset})
+        ret_wide = df[ret_cols].rename(columns=self._asset_from_prefixed_col)
 
-        # ----------------------------
-        # 3) Features
-        # ----------------------------
-        X = df.drop(columns=[ret_col], errors="ignore")
+        if ret_wide.columns.duplicated().any():
+            dupes = ret_wide.columns[ret_wide.columns.duplicated()].tolist()
+            raise ValueError(f"Duplicate asset names after return rename: {dupes}")
 
-        if drop_value_cols:
-            X = X.drop(columns=list(drop_value_cols), errors="ignore")
+        if assets is not None:
+            requested_assets = list(assets)
+            missing_assets = [a for a in requested_assets if a not in ret_wide.columns]
+            if missing_assets:
+                raise ValueError(f"Missing requested return columns for assets: {missing_assets}")
+            ret_wide = ret_wide.loc[:, requested_assets]
 
-        # required feature check
-        if required_cols:
-            missing = [c for c in required_cols if c not in X.columns]
-            if missing:
-                raise ValueError(
-                    f"Missing required feature columns: {missing}\n"
-                    f"Available columns: {list(X.columns)[:30]}"
-                )
+        ret_cols_used = [
+            c for c in ret_cols
+            if self._asset_from_prefixed_col(c) in ret_wide.columns
+        ]
 
-        # ----------------------------
-        # 4) Align
-        # ----------------------------
-        idx = ret_wide.index.intersection(X.index)
-        ret_wide = ret_wide.loc[idx].dropna(how="all")
-        X = X.loc[ret_wide.index]
+        return ret_wide, ret_cols_used
 
-        return ModelInputs(ret=ret_wide, features=X)
+    def _extract_asset_features(
+        self,
+        df: pd.DataFrame,
+        *,
+        required_asset_features: Sequence[str],
+        assets: Sequence[str],
+    ) -> tuple[dict[str, pd.DataFrame], list[str]]:
+        feature_panels: dict[str, pd.DataFrame] = {}
+        used_cols: list[str] = []
+
+        for feat in required_asset_features:
+            cols = []
+            rename_map = {}
+
+            for asset in assets:
+                col = f"{asset}_{feat}"
+                if col not in df.columns:
+                    raise ValueError(
+                        f"Missing required asset feature '{feat}' for asset '{asset}'. "
+                        f"Expected column: {col}"
+                    )
+                cols.append(col)
+                rename_map[col] = asset
+
+            panel = df.loc[:, cols].rename(columns=rename_map)
+
+            if panel.columns.duplicated().any():
+                dupes = panel.columns[panel.columns.duplicated()].tolist()
+                raise ValueError(f"Duplicate asset names in feature panel '{feat}': {dupes}")
+
+            feature_panels[feat] = panel
+            used_cols.extend(cols)
+
+        return feature_panels, used_cols
+
+    def _extract_global_features(
+        self,
+        df: pd.DataFrame,
+        *,
+        required_global_features: Sequence[str],
+        exclude_cols: set[str],
+    ) -> pd.DataFrame:
+        missing = [c for c in required_global_features if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"Missing required global features: {missing}\n"
+                f"Available columns (sample): {list(df.columns)[:30]}"
+            )
+
+        if required_global_features:
+            return df.loc[:, list(required_global_features)].copy()
+
+        global_cols = [
+            c for c in df.columns
+            if c not in exclude_cols and "_" not in c
+        ]
+        return df.loc[:, global_cols].copy()
+
+    def _align_all(
+        self,
+        *,
+        ret_wide: pd.DataFrame,
+        asset_features: dict[str, pd.DataFrame],
+        global_features: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame], pd.DataFrame]:
+        ret_wide = ret_wide.dropna(how="all")
+        idx = ret_wide.index
+
+        aligned_asset_features = {
+            feat: panel.loc[idx]
+            for feat, panel in asset_features.items()
+        }
+
+        global_features = global_features.loc[idx]
+
+        return ret_wide, aligned_asset_features, global_features
+
+    @staticmethod
+    def _asset_from_prefixed_col(col: str) -> str:
+        return col.split("_", 1)[0]

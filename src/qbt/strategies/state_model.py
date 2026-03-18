@@ -72,18 +72,19 @@ class StateSignalModel(Strategy):
 
         return out
 
-    def required_features(self, spec: RunSpec) -> list[str]:
-        """
-        Features needed from inputs.features (returns are always in inputs.ret).
-        """
+    
+
+    def required_asset_features(self, spec: RunSpec) -> list[str]:
         p = self.parse_params(spec)
         return [p["state_var"]]
+
+  
 
     def fit(self, inputs: ModelInputs, spec: RunSpec) -> None:
         p = self.parse_params(spec)
         self.state_var_ = p["state_var"]
 
-        X = inputs.features.sort_index().copy()
+        X = inputs.asset_features.sort_index().copy()
         r = inputs.ret.sort_index()
 
         if self.state_var_ not in X.columns:
@@ -137,7 +138,7 @@ class StateSignalModel(Strategy):
         if self.tau_ is None:
             raise RuntimeError("predict called before fit().")
 
-        X = inputs.features.sort_index()
+        X = inputs.asset_features.sort_index()
 
         p = self.parse_params(spec)
         state_var = p["state_var"]

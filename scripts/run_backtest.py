@@ -6,7 +6,6 @@ import copy
 
 from qbt.core.types import RunSpec, BacktestSpec
 from qbt.backtesting.engine import BacktestEngine
-from qbt.data.dataloader import DefaultDataAdapter
 from qbt.storage.storage import LocalStorage
 from qbt.storage.paths import StoragePaths
 from qbt.storage.artifacts import BacktestStore
@@ -72,8 +71,8 @@ def main():
     base_state = load_yaml("configs/strategies/run_state.yaml")['run']
     base_state["data_path"] = "data/gold/freq=1D/tag=experiment/table.parquet"
 
-    state_vars = ["XLE_rvol"]
-    min_frac = [0, 0.05, .1, .15]
+    state_vars = ["rvol"]
+    min_frac = [0.05]
 
     for state_var, outlier_cap in product(state_vars, min_frac):
         cfg = deep_update(
@@ -90,22 +89,22 @@ def main():
         spec = RunSpec(**cfg)
         run_backtest(spec=spec, bt_spec=bt_spec, engine=bt, artifact_store=artifact_store)
 
-    # mean_var runs
-    for state_var, gamma, outlier_cap in product(state_vars, [1, 5, 10], min_frac):
-        cfg = deep_update(
-            base_state,
-            {
-                "params": {
-                    "min_frac": outlier_cap,
-                    "state_var": state_var,
-                    "weight_allocation": "mean_var",
-                    "gamma": gamma,
-                }
-            },
-        )
+    # # mean_var runs
+    # for state_var, gamma, outlier_cap in product(state_vars, [1, 5, 10], min_frac):
+    #     cfg = deep_update(
+    #         base_state,
+    #         {
+    #             "params": {
+    #                 "min_frac": outlier_cap,
+    #                 "state_var": state_var,
+    #                 "weight_allocation": "mean_var",
+    #                 "gamma": gamma,
+    #             }
+    #         },
+    #     )
 
-        spec = RunSpec(**cfg)
-        run_backtest(spec=spec, bt_spec=bt_spec, engine=bt, artifact_store=artifact_store)
+    #     spec = RunSpec(**cfg)
+    #     run_backtest(spec=spec, bt_spec=bt_spec, engine=bt, artifact_store=artifact_store)
 
     
 

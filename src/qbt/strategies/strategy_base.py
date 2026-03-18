@@ -14,9 +14,31 @@ class Strategy(ABC):
     """
 
     @abstractmethod
-    def required_features(self, spec: RunSpec) -> List[str]:
-        """Feature columns needed by the model (not returns)."""
+    def required_asset_features(self, spec: RunSpec) -> List[str]:
+        """
+        Per-asset feature names needed by the model, excluding returns.
+
+        Examples:
+          ["rvol_20"]
+          ["mom_60", "rv_5d"]
+
+        These should correspond to columns in storage like:
+          XLE_rvol_20, XLK_rvol_20, ...
+        """
         raise NotImplementedError
+
+    def required_global_features(self, spec: RunSpec) -> List[str]:
+        """
+        Shared/global feature names needed by the model.
+
+        Examples:
+          ["OVX"]
+          ["DGS10", "TBILL_3M"]
+
+        These should correspond to non-asset-specific columns in storage.
+        Default is no global features.
+        """
+        return []
 
     @abstractmethod
     def fit(self, inputs: ModelInputs, spec: RunSpec) -> None:

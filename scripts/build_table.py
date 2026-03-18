@@ -37,12 +37,15 @@ def main():
 
     # ---- HARD-CODE experiment change in sources ----
     # # Example: override start date for this run
-    cfg["ingestion"]["start_override"] = "2024-01-01"
-    cfg['ingestion']['end_override'] = "2026-01-01"
-    cfg['sources']['macro_fred']['enabled'] = True
-
     cfg['gold']['cfg']['tag'] = 'experiment'
-    cfg['gold']['cfg']['daily_assets'] =  ['OVXCLS', 'DCOILWTICO', 'DHHNGSP', 'GASREGCOVW']
+    
+    cfg["ingestion"]["start_override"] = "2021-01-01"
+    cfg['ingestion']['end_override'] = "2026-01-01"
+
+    # cfg['sources']['macro_fred']['enabled'] = True
+    # cfg['gold']['cfg']['daily_assets'] =  ['OVXCLS', 'DCOILWTICO', 'DHHNGSP', 'GASREGCOVW']
+    
+    cfg['gold']['cfg']['intraday_assets'] =  ["SPY", "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLRE", "XLK", "XLU"]
 
 
     # ---- Per-run id ----
@@ -64,15 +67,13 @@ def main():
     paths = StoragePaths()
     artifact_store = LiveStore(storage, paths)
 
+    ingest_all_sources(storage=storage, paths=paths, ingestion_cfg=cfg['ingestion'], sources_cfg=cfg['sources'])
 
-
-    # ingest_all_sources(storage=storage, paths=paths, ingestion_cfg=cfg['ingestion'], sources_cfg=cfg['sources'])
-
-    # canonicalize_all(
-    #     storage=storage,
-    #     paths=paths,
-    #     sources_cfg=cfg["sources"],
-    # )
+    canonicalize_all(
+        storage=storage,
+        paths=paths,
+        sources_cfg=cfg["sources"],
+    )
 
     build_gold_model_table(
         storage,

@@ -1,62 +1,110 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, Optional, Sequence
+from typing import Any, Callable
 
-from qbt.storage.storage import Storage
-from qbt.storage.paths import StoragePaths
 
-from qbt.pipeline.ingestion import ingest_all_sources
-from qbt.pipeline.silver import canonicalize_all
-from qbt.pipeline.gold import build_gold_model_table
 from qbt.pipeline.execute import execute_weights
-from qbt.pipeline.signal import signal
 from qbt.pipeline.evaluation import evaluate_portfolio
+from qbt.pipeline.gold import build_gold_model_table
+from qbt.pipeline.ingestion import ingest_all_sources
+from qbt.pipeline.signal import signal
+from qbt.pipeline.silver import canonicalize_all
 
-import pprint
 
-def run_pipeline(storage, paths, cfg, artifact_store):
+@dataclass(frozen=True)
+class PipelineDeps:
+    storage: Any
+    paths: Any
+    artifact_store: Any
 
 
-    if cfg["ingestion"]["enabled"]:
-        ingest_all_sources(
-            storage,
-            paths,
-            ingestion_cfg=cfg["ingestion"]['cfg'],
-            sources_cfg=cfg["sources"],
-        )
-        
+@dataclass(frozen=True)
+class PipelineContext:
+    deps: PipelineDeps
+    cfg: dict
+    sources_cfg: dict
 
-    if cfg["silver"]["enabled"]:
-        canonicalize_all(
-            storage,
-            paths,
-            sources_cfg=cfg["sources"],
-        )
 
-    if cfg["gold"]["enabled"]:
-        build_gold_model_table(
-            storage,
-            paths,
-            gold_cfg=cfg["gold"]['cfg'],
-        )
+@dataclass(frozen=True)
+class PipelineStage:
+    name: str
+    runner: Callable[[PipelineContext, dict], None]
 
-    if cfg["signal"]["enabled"]:
-        signal(
-            live_storage=artifact_store,
-            # paths=paths,
-            strat_cfg=cfg["signal"]['cfg'],
-        )
+    def enabled(self, pipeline_cfg: dict) -> bool:
+        return bool(pipeline_cfg.get(self.name, {}).get("enabled", False))
 
-    if cfg["execution"]["enabled"]:
-        execute_weights(
-            live_storage=artifact_store,
-            # paths,
-            execution_cfg=cfg["execution"]['cfg'],
-        )
+    def stage_cfg(self, pipeline_cfg: dict) -> dict:
+        return pipeline_cfg.get(self.name, {}).get("cfg", {})
 
-    if cfg["evaluation"]["enabled"]:
-        evaluate_portfolio(
-            live_storage=artifact_store,
-            execution_cfg=cfg["evaluation"]['cfg'],
-        )
+
+def _run_ingestion(ctx: PipelineContext, stage_cfg: dict) -> None:
+    ingest_all_sources(
+        ctx.deps.storage,
+        ctx.deps.paths,
+        ingestion_cfg=stage_cfg,
+        sources_cfg=ctx.sources_cfg,
+    )
+
+
+def _run_silver(ctx: PipelineContext, stage_cfg: dict) -> None:
+    canonicalize_all(
+        ctx.deps.storage,
+        ctx.deps.paths,
+        sources_cfg=ctx.sources_cfg,
+    )
+
+
+def _run_gold(ctx: PipelineContext, stage_cfg: dict) -> None:
+    build_gold_model_table(
+        ctx.deps.storage,
+        ctx.deps.paths,
+        gold_cfg=stage_cfg,
+    )
+
+
+def _run_signal(ctx: PipelineContext, stage_cfg: dict) -> None:
+    signal(
+        live_storage=ctx.deps.artifact_store,
+        strat_cfg=stage_cfg,
+    )
+
+
+def _run_execution(ctx: PipelineContext, stage_cfg: dict) -> None:
+    execute_weights(
+        live_storage=ctx.deps.artifact_store,
+        execution_cfg=stage_cfg,
+    )
+
+
+def _run_evaluation(ctx: PipelineContext, stage_cfg: dict) -> None:
+    evaluate_portfolio(
+        live_storage=ctx.deps.artifact_store,
+        execution_cfg=stage_cfg,
+    )
+
+
+PIPELINE_STAGES: tuple[PipelineStage, ...] = (
+    PipelineStage("ingestion", _run_ingestion),
+    PipelineStage("silver", _run_silver),
+    PipelineStage("gold", _run_gold),
+    PipelineStage("signal", _run_signal),
+    PipelineStage("execution", _run_execution),
+    PipelineStage("evaluation", _run_evaluation),
+)
+
+
+def run_pipeline(storage: Any, paths: Any, cfg: dict, artifact_store: Any) -> None:
+    ctx = PipelineContext(
+        deps=PipelineDeps(
+            storage=storage,
+            paths=paths,
+            artifact_store=artifact_store,
+        ),
+        cfg=cfg,
+        sources_cfg=cfg.get("sources", {}),
+    )
+
+    for stage in PIPELINE_STAGES:
+        if stage.enabled(cfg):
+            stage.runner(ctx, stage.stage_cfg(cfg))
