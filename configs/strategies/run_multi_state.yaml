@@ -1,8 +1,7 @@
 run: 
-  strategy_name: StateSignal
-  universe: XLE
-  tag: rv_regime_5m
-  assets: ['XLE']
+  strategy_name: MultiAssetStateSignal
+  universe: SPY
+  assets: [ "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLRE", "XLK", "XLU"]
   data_path: 'data/gold/freq=1D/tag=model_ready/table.parquet'
 
   params:
@@ -11,7 +10,7 @@ run:
     min_frac: 0.05
     w_min: 0
     w_max: 1.0
-    weight_allocation: 'mean_var'
+    weight_allocation: 'binary'
     gamma: 5.0
 
 

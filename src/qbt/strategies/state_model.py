@@ -194,7 +194,7 @@ class StateSignalModel(Strategy):
                 eps=p["eps"],
             )
         else:
-            w_low, w_high = 1.0, 0.0
+            w_low, w_high = p["w_min"], p["w_max"]
 
         self.tau_ = float(tau)
         self.w_low_ = float(w_low)

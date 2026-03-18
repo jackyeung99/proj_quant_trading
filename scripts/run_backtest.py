@@ -68,7 +68,8 @@ def main():
     bt_cfg = load_yaml("configs/bt_method.yaml")
     bt_spec = BacktestSpec(**bt_cfg)
 
-    base_state = load_yaml("configs/strategies/run_state.yaml")['run']
+    base_state = load_yaml("configs/strategies/run_multi_state.yaml")['run']
+    # base_state = load_yaml("configs/strategies/run_state.yaml")['run']
     base_state["data_path"] = "data/gold/freq=1D/tag=experiment/table.parquet"
 
     state_vars = ["rvol"]
@@ -81,7 +82,7 @@ def main():
                 "params": {
                     "min_frac": outlier_cap,
                     "state_var": state_var,
-                    "weight_allocation": "binary",
+                    "weight_allocation": "mean_var",
                 }
             },
         )
@@ -89,22 +90,7 @@ def main():
         spec = RunSpec(**cfg)
         run_backtest(spec=spec, bt_spec=bt_spec, engine=bt, artifact_store=artifact_store)
 
-    # # mean_var runs
-    # for state_var, gamma, outlier_cap in product(state_vars, [1, 5, 10], min_frac):
-    #     cfg = deep_update(
-    #         base_state,
-    #         {
-    #             "params": {
-    #                 "min_frac": outlier_cap,
-    #                 "state_var": state_var,
-    #                 "weight_allocation": "mean_var",
-    #                 "gamma": gamma,
-    #             }
-    #         },
-    #     )
 
-    #     spec = RunSpec(**cfg)
-    #     run_backtest(spec=spec, bt_spec=bt_spec, engine=bt, artifact_store=artifact_store)
 
     
 

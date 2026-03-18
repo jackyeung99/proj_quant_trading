@@ -109,12 +109,11 @@ class BacktestEngine:
         strat = create_strategy(spec.strategy_name)
 
         raw = self.data_adapter.load(spec)
-
       
+        assets = spec.assets
         asset_features = strat.required_asset_features(spec)
         global_features = strat.required_global_features(spec)
-
-        assets = spec.assets
+        
         inputs = self.data_adapter.prepare(
             raw=raw,
             spec=spec,
@@ -132,6 +131,7 @@ class BacktestEngine:
         w_test = w_full.loc[test_mask].fillna(0.0)         # safe: only test rows remain
         state_test = state_full.loc[state_full.index.intersection(ret_test.index)]
 
+        print(state_test)
         ts_df = simulate_strategy_execution(
             ret_test,
             w_test,
@@ -143,6 +143,8 @@ class BacktestEngine:
 
         # append model state onto test timeseries (no join surprises)
         ts_df = ts_df.join(state_test, how="left")
+
+        ts_df.to_csv('test.csv')
 
         run_id = make_run_id(spec.strategy_name, spec.universe)
         meta = RunMeta(
