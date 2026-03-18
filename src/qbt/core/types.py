@@ -32,8 +32,9 @@ class RunSpec:
 @dataclass
 class ModelBundle:
     model: Any
-    feature_cols: list[str]
     ret_cols: list[str]
+    asset_feature_cols: list[str]
+    global_feature_cols: list[str]
     trained_at: str
     train_start: str
     train_end: str

@@ -7,7 +7,7 @@ import pandas as pd
 
 from qbt.core.logging import get_logger
 from qbt.core.types import RunSpec, ModelInputs, ModelBundle
-from qbt.data.dataloader import DataAdapter, DefaultDataAdapter
+from qbt.data.dataloader import DataAdapter, WidePrefixDataAdapter
 from qbt.strategies.strategy_registry import create_strategy
 from qbt.utils.dates import _to_utc, _session_date_from_ts, _stamp_asof_utc
 from qbt.utils.stamping import make_snapshot_id, config_hash
@@ -60,32 +60,100 @@ def should_retrain(
 def prepare_inputs(
     data_adapter: DataAdapter,
     spec: RunSpec,
-    required_cols: list[str],
+    required_asset_features: list[str],
+    required_global_features: list[str],
 ) -> ModelInputs:
     raw = data_adapter.load(spec)
-    return data_adapter.prepare(raw, spec, required_cols=required_cols)
+    return data_adapter.prepare(
+        raw,
+        spec,
+        required_asset_features=required_asset_features,
+        required_global_features=required_global_features,
+        assets=getattr(spec, "assets", None),
+    )
+
+
+def _slice_model_inputs(inputs: ModelInputs, idx: pd.Index) -> ModelInputs:
+    return ModelInputs(
+        ret=inputs.ret.loc[idx],
+        asset_features={
+            name: panel.loc[idx]
+            for name, panel in inputs.asset_features.items()
+        },
+        global_features=inputs.global_features.loc[idx],
+    )
 
 
 def slice_train_window(inputs: ModelInputs, *, lookback: int) -> ModelInputs:
-    idx = inputs.features.index.intersection(inputs.ret.index)
-    feats = inputs.features.loc[idx].tail(lookback)
-    rets = inputs.ret.loc[feats.index]
-    return ModelInputs(ret=rets, features=feats)
+    idx = inputs.ret.index.sort_values()
+    idx = idx[-lookback:]
+    return _slice_model_inputs(inputs, idx)
+
+
+def _model_input_length(inputs: ModelInputs) -> int:
+    return len(inputs.ret.index)
 
 
 def enforce_bundle_schema(bundle: ModelBundle, inputs: ModelInputs) -> ModelInputs:
-    idx = inputs.features.index.intersection(inputs.ret.index)
-    feats = inputs.features.loc[idx]
+    ret = inputs.ret.copy()
 
-    missing = [c for c in bundle.feature_cols if c not in feats.columns]
-    if missing:
-        raise ValueError(f"Missing feature columns at inference: {missing}")
+    missing_ret = [c for c in bundle.ret_cols if c not in ret.columns]
+    if missing_ret:
+        raise ValueError(f"Missing return columns at inference: {missing_ret}")
 
-    feats = feats.reindex(columns=bundle.feature_cols)
-    rets = inputs.ret.loc[idx].reindex(columns=bundle.ret_cols)
+    ret = ret.reindex(columns=bundle.ret_cols)
 
-    return ModelInputs(ret=rets, features=feats)
+    required_asset_features = list(getattr(bundle, "asset_feature_cols", []) or [])
+    required_global_features = list(getattr(bundle, "global_feature_cols", []) or [])
 
+    missing_asset_features = [
+        feat for feat in required_asset_features
+        if feat not in inputs.asset_features
+    ]
+    if missing_asset_features:
+        raise ValueError(f"Missing asset features at inference: {missing_asset_features}")
+
+    asset_features = {}
+    for feat in required_asset_features:
+        panel = inputs.asset_features[feat]
+        missing_assets = [c for c in bundle.ret_cols if c not in panel.columns]
+        if missing_assets:
+            raise ValueError(
+                f"Asset feature '{feat}' missing assets at inference: {missing_assets}"
+            )
+        asset_features[feat] = panel.reindex(columns=bundle.ret_cols)
+
+    missing_global = [
+        c for c in required_global_features
+        if c not in inputs.global_features.columns
+    ]
+    if missing_global:
+        raise ValueError(f"Missing global features at inference: {missing_global}")
+
+    global_features = inputs.global_features.reindex(columns=required_global_features)
+
+    idx = ret.index
+    for feat, panel in asset_features.items():
+        idx = idx.intersection(panel.index)
+    idx = idx.intersection(global_features.index)
+
+    ret = ret.loc[idx]
+    asset_features = {k: v.loc[idx] for k, v in asset_features.items()}
+    global_features = global_features.loc[idx]
+
+    return ModelInputs(
+        ret=ret,
+        asset_features=asset_features,
+        global_features=global_features,
+    )
+
+
+def latest_row_df(w: pd.DataFrame) -> pd.DataFrame:
+    if w is None or not isinstance(w, pd.DataFrame) or w.empty:
+        raise ValueError("Strategy must return a non-empty DataFrame of weights.")
+    if not isinstance(w.index, pd.DatetimeIndex):
+        raise ValueError("Weights DataFrame must be indexed by DatetimeIndex.")
+    return w.tail(1).astype(float).fillna(0.0)
 
 def latest_row_df(w: pd.DataFrame) -> pd.DataFrame:
     if w is None or not isinstance(w, pd.DataFrame) or w.empty:
@@ -96,7 +164,7 @@ def latest_row_df(w: pd.DataFrame) -> pd.DataFrame:
 
 
 def signal(
-    live_storage,  # LiveStore
+    live_storage,
     strat_cfg: dict,
     *,
     data_adapter: Optional[DataAdapter] = None,
@@ -120,17 +188,17 @@ def signal(
 
     cfg_hash = config_hash(run_cfg)
 
-    data_adapter = data_adapter or DefaultDataAdapter(storage=live_storage.storage)
+    data_adapter = data_adapter or WidePrefixDataAdapter(storage=live_storage.storage)
 
     strat = create_strategy(spec.strategy_name)
-    req = strat.required_features(spec)
+    req_asset = strat.required_asset_features(spec)
+    req_global = strat.required_global_features(spec)
 
     logger.info(
         f"Signal start | strategy={spec.strategy_name} universe={universe} "
         f"retrain_freq={retrain_freq} lookback={lookback} min_train={min_train} market_tz={market_tz}"
     )
 
-    # Load existing live artifacts
     bundle = live_storage.read_model(spec.strategy_name, universe)
     meta = live_storage.read_model_meta(spec.strategy_name, universe) or None
 
@@ -144,60 +212,59 @@ def signal(
 
     snapshot_id: str | None = None
 
-    # -------------------------
-    # TRAIN (optional)
-    # -------------------------
     if do_train:
         logger.info("Retrain triggered")
 
-        inputs_all = prepare_inputs(data_adapter, spec, required_cols=req)
+        inputs_all = prepare_inputs(
+            data_adapter,
+            spec,
+            required_asset_features=req_asset,
+            required_global_features=req_global,
+        )
+    
         train_inputs = slice_train_window(inputs_all, lookback=lookback)
 
-        n_train = len(train_inputs.features)
+        n_train = _model_input_length(train_inputs)
         if n_train < min_train:
             raise ValueError(f"Not enough train data: {n_train} < {min_train}")
 
         strat.fit(train_inputs, spec)
         logger.info("Model fit complete")
 
-        train_start_session = pd.Timestamp(train_inputs.features.index.min()).normalize()
-        train_end_session   = pd.Timestamp(train_inputs.features.index.max()).normalize()
+        train_start_session = pd.Timestamp(train_inputs.ret.index.min()).normalize()
+        train_end_session = pd.Timestamp(train_inputs.ret.index.max()).normalize()
 
-        # audit stamps at cutoff (UTC, tz-aware)
         train_start_asof_utc = _stamp_asof_utc(train_start_session, market_tz=market_tz, hour=cutoff_hour)
-        train_end_asof_utc   = _stamp_asof_utc(train_end_session,   market_tz=market_tz, hour=cutoff_hour)
+        train_end_asof_utc = _stamp_asof_utc(train_end_session, market_tz=market_tz, hour=cutoff_hour)
 
-        trained_at_utc = now_iso  # keep UTC iso
+        trained_at_utc = now_iso
         snapshot_id = make_snapshot_id(trained_at_utc, cfg_hash)
 
         bundle = ModelBundle(
             model=strat,
-            feature_cols=list(train_inputs.features.columns),
+            asset_feature_cols=list(req_asset),
+            global_feature_cols=list(req_global),
             ret_cols=list(train_inputs.ret.columns),
-            trained_at=trained_at_utc,     # UTC iso
+            trained_at=trained_at_utc,
             train_start=str(train_start_asof_utc),
             train_end=str(train_end_asof_utc),
             config_hash=cfg_hash,
         )
 
         meta_out = {
-            # lineage keys
             "snapshot_id": snapshot_id,
             "trained_at_utc": trained_at_utc,
             "config_hash": cfg_hash,
-
-            # training window keys (daily + exact)
             "train_start_session_date": str(train_start_session),
             "train_end_session_date": str(train_end_session),
             "train_start_asof_utc": str(train_start_asof_utc),
             "train_end_asof_utc": str(train_end_asof_utc),
-
-            # config
             "retrain_freq": retrain_freq,
             "train_lookback_bars": lookback,
             "min_train_bars": min_train,
-            "feature_cols": bundle.feature_cols,
-            "ret_cols": bundle.ret_cols,
+            "asset_feature_cols": list(req_asset),
+            "global_feature_cols": list(req_global),
+            "ret_cols": list(train_inputs.ret.columns),
             "bundle_version": getattr(bundle, "version", "v1"),
             "market_tz": market_tz,
             "cutoff_hour": cutoff_hour,
@@ -212,46 +279,39 @@ def signal(
             snapshot=bool(live_cfg.get("snapshot_models", True)),
         )
 
-        meta = meta_out  # make sure inference uses new meta
+        meta = meta_out
         logger.info(f"Wrote model latest + snapshot_id={snapshot_id}")
     else:
         logger.info("Retrain skipped")
-        # If we didn’t retrain, use whatever snapshot_id the loaded meta has
         if meta:
             snapshot_id = meta.get("snapshot_id")
 
     if bundle is None:
         raise RuntimeError("No trained live model available (missing model artifact/meta).")
 
-    # -------------------------
-    # INFERENCE
-    # -------------------------
-    inputs_now = prepare_inputs(data_adapter, spec, required_cols=req)
+    inputs_now = prepare_inputs(
+        data_adapter,
+        spec,
+        required_asset_features=list(getattr(bundle, "asset_feature_cols", []) or []),
+        required_global_features=list(getattr(bundle, "global_feature_cols", []) or []),
+    )
     inputs_now = enforce_bundle_schema(bundle, inputs_now)
 
-    last_idx = pd.Timestamp(inputs_now.features.index.max())
-
-    # since index is a NY-normalized session_date label (tz-na ive midnight)
-    session_date = last_idx.normalize()  # tz-naive midnight
-
-    # asof_utc = cutoff time for that session label
+    last_idx = pd.Timestamp(inputs_now.ret.index.max())
+    session_date = last_idx.normalize()
     asof_utc = _stamp_asof_utc(session_date, market_tz=market_tz, hour=cutoff_hour)
 
     w_ts = bundle.model.predict(inputs_now, spec)
     latest_w = latest_row_df(w_ts)
 
-    # key by session_date (daily join key)
     latest_w.index = pd.DatetimeIndex([session_date], name="session_date")
     latest_w["session_date"] = session_date
-
-    # stamps / lineage
     latest_w["asof_utc"] = asof_utc
     latest_w["generated_at_utc"] = now_utc
     latest_w["config_hash"] = cfg_hash
     latest_w["market_tz"] = market_tz
     latest_w["cutoff_hour"] = cutoff_hour
 
-    # lineage pointer to model snapshot
     if snapshot_id is None and meta:
         snapshot_id = meta.get("snapshot_id")
     latest_w["snapshot_id"] = snapshot_id or "unknown"

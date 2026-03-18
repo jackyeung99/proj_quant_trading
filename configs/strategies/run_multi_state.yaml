@@ -1,7 +1,7 @@
 run: 
   strategy_name: MultiAssetStateSignal
   universe: SPY
-  assets: [ "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLRE", "XLK", "XLU"]
+  assets: [ "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
   data_path: 'data/gold/freq=1D/tag=model_ready/table.parquet'
 
   params:

@@ -88,6 +88,7 @@ def build_weights(
         )
 
         extra = strat.get_persisted_series(test_inputs=test_inputs, spec=spec)
+
         if extra is not None and not extra.empty:
             extra_blocks.append(extra.reindex(test_inputs.ret.index))
 
