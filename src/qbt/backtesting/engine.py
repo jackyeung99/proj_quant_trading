@@ -123,7 +123,6 @@ class BacktestEngine:
             required_global_features=global_features,
         )
 
-        print(inputs)
         w_full, state_full, test_mask = build_weights(
             inputs=inputs, strat=strat, spec=spec, assets=assets, bt=bt
         )
