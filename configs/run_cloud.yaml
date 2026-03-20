@@ -22,7 +22,7 @@ gold:
 
 signal:
   enabled: True
-  config: "strategies/run_state.yaml"
+  config: "strategies/run_multi_state.yaml"
 
 execution:
   enabled: True

@@ -1,6 +1,6 @@
-strategy_name: 'StateSignal'
-universe: 'XLE'
-dry_run: True
+strategy_name: 'MultiAssetStateSignal'
+universe: 'SPY-Sector'
+dry_run: False
 holding_period:
     enabled: False
     mode: "rebalance_then_liquidate"          # or "flat_then_rebalance" if you later want both

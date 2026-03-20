@@ -149,9 +149,7 @@ def compute_portfolio_metrics(
     col_gross: str = "port_ret_gross",
     col_net: Optional[str] = "port_ret_net",
     col_bh: Optional[str] = "bh_ret",
-    col_turnover: Optional[str] = "turnover",
     col_signal: Optional[str] = "signal",
-    col_xle_weight: str = "xle_weight",
 ) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
 
@@ -166,31 +164,40 @@ def compute_portfolio_metrics(
 
     if col_bh and col_bh in ts_df.columns:
         out.update(_perf_metrics(ts_df[col_bh], ann_factor=ann_factor, return_type=return_type, prefix="bh_"))
+
         # excess vs bh using net if available else gross
         ref = ts_df[col_net] if (col_net and col_net in ts_df.columns) else ts_df[col_gross]
         r_ref = _to_series(ref)
         r_bh = _to_series(ts_df[col_bh])
         idx = r_ref.index.intersection(r_bh.index)
         if len(idx) > 2:
-            out.update(_perf_metrics(r_ref.loc[idx] - r_bh.loc[idx], ann_factor=ann_factor, return_type=return_type, prefix="excess_"))
+            out.update(
+                _perf_metrics(
+                    r_ref.loc[idx] - r_bh.loc[idx],
+                    ann_factor=ann_factor,
+                    return_type=return_type,
+                    prefix="excess_",
+                )
+            )
             net_sh = out.get("net_sharpe", out.get("gross_sharpe"))
             bh_sh = out.get("bh_sharpe")
             if (net_sh is not None) and (bh_sh is not None):
                 out["sharpe_minus_bh"] = float(net_sh - bh_sh)
-    
+
     # signal behavior
     if col_signal and col_signal in ts_df.columns:
         out.update(_signal_metrics(ts_df[col_signal], ann_factor=ann_factor, prefix="signal_"))
 
+    # average / min / max for any weight column
+    weight_cols = [c for c in ts_df.columns if str(c).endswith("weight")]
 
-    # average weights 
-    if col_xle_weight in ts_df.columns:
-        w = pd.to_numeric(ts_df[col_xle_weight], errors="coerce").fillna(0.0)
+    for col in weight_cols:
+        w = pd.to_numeric(ts_df[col], errors="coerce").fillna(0.0)
+        base = str(col)
 
-        out["avg_xle_weight"] = float(w.mean())
-        out["max_xle_weight"] = float(w.max())
-        out["min_xle_weight"] = float(w.min())
-        # out["pct_invested_xle"] = float((w != 0).mean() * 100.0)
-
+        out[f"avg_{base}"] = float(w.mean())
+        out[f"max_{base}"] = float(w.max())
+        out[f"min_{base}"] = float(w.min())
+        # out[f"pct_invested_{base}"] = float((w != 0).mean() * 100.0)
 
     return out

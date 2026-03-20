@@ -1,6 +1,6 @@
 
-strategy_name: StateSignal
-universe: XLE
+strategy_name: MultiAssetStateSignal
+universe: SPY
 
 portfolio:
   source: alpaca
@@ -8,5 +8,5 @@ portfolio:
   timeframe: 1D
 
 gold_path: data/gold/freq=1D/tag=model_ready/table.parquet
-benchmark: XLE        # for buy & hold comparison
+# benchmark: XLE        # for buy & hold comparison
 

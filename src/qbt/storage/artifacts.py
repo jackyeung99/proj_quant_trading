@@ -200,15 +200,12 @@ class LiveStore:
         keys = self.storage.list(prefix)
 
         if not keys:
-            # logger.info("read_all_model_meta: no keys under prefix=%s", prefix)
             return pd.DataFrame()
 
         meta_keys = [k for k in keys if str(k).endswith("meta.json")]
         if not meta_keys:
             logger.info("read_all_model_meta: no meta.json under prefix=%s (keys=%d)", prefix, len(keys))
             return pd.DataFrame()
-
-        # logger.info("read_all_model_meta: prefix=%s keys=%d meta_keys=%d", prefix, len(keys), len(meta_keys))
 
         def _parse_snapshot_id_from_key(k: str) -> str | None:
             s = str(k)
@@ -219,6 +216,82 @@ class LiveStore:
             if m:
                 return m.group(1)
             return None
+
+        def _flatten_dict(d: dict, parent_key: str = "", sep: str = "__") -> dict:
+            out = {}
+            for k, v in d.items():
+                new_key = f"{parent_key}{sep}{k}" if parent_key else str(k)
+                if isinstance(v, dict):
+                    out.update(_flatten_dict(v, new_key, sep=sep))
+                else:
+                    out[new_key] = v
+            return out
+
+        def _flatten_strategy_meta(strat_meta: dict) -> dict:
+            """
+            Case 1:
+                strategy_meta is already flat -> return as-is
+
+            Case 2:
+                strategy_meta has a `children` key -> flatten child params
+                into columns like child_name__param
+            """
+            if not isinstance(strat_meta, dict):
+                return {}
+
+            # second case: nested children
+            children = strat_meta.get("children")
+            if children is not None:
+                flat = {}
+
+                # keep any top-level fields except children
+                top_level = {k: v for k, v in strat_meta.items() if k != "children"}
+                flat.update(_flatten_dict(top_level))
+
+                if isinstance(children, dict):
+                    for child_name, child_meta in children.items():
+                        if not isinstance(child_meta, dict):
+                            flat[f"{child_name}"] = child_meta
+                            continue
+
+                        params = child_meta.get("params", {})
+                        if isinstance(params, dict):
+                            flat.update(_flatten_dict(params, parent_key=str(child_name)))
+                        else:
+                            flat[f"{child_name}__params"] = params
+
+                        # optionally preserve other child-level fields too
+                        other_child_fields = {k: v for k, v in child_meta.items() if k != "params"}
+                        if other_child_fields:
+                            flat.update(_flatten_dict(other_child_fields, parent_key=str(child_name)))
+
+                elif isinstance(children, list):
+                    for i, child_meta in enumerate(children):
+                        if not isinstance(child_meta, dict):
+                            flat[f"child_{i}"] = child_meta
+                            continue
+
+                        child_name = str(child_meta.get("name", f"child_{i}"))
+                        params = child_meta.get("params", {})
+                        if isinstance(params, dict):
+                            flat.update(_flatten_dict(params, parent_key=child_name))
+                        else:
+                            flat[f"{child_name}__params"] = params
+
+                        other_child_fields = {
+                            k: v for k, v in child_meta.items()
+                            if k not in {"name", "params"}
+                        }
+                        if other_child_fields:
+                            flat.update(_flatten_dict(other_child_fields, parent_key=child_name))
+
+                else:
+                    flat["children"] = children
+
+                return flat
+
+            # original case: flat strategy_meta
+            return _flatten_dict(strat_meta)
 
         rows: list[dict] = []
         n_read_ok = 0
@@ -241,7 +314,6 @@ class LiveStore:
 
             snapshot_id = meta.get("snapshot_id") or _parse_snapshot_id_from_key(str(k))
 
-            # keep fallback + unknown-handling (DO NOT overwrite later)
             trained_at_utc = meta.get("trained_at_utc") or meta.get("trained_at")
             trained_at_utc = None if trained_at_utc in (None, "", "unknown") else str(trained_at_utc)
 
@@ -258,8 +330,10 @@ class LiveStore:
                 logger.warning("read_all_model_meta: strategy_meta not dict key=%s type=%s", str(k), type(strat_meta))
                 strat_meta = {}
 
+            flat_strat_meta = _flatten_strategy_meta(strat_meta)
+
             rows.append({
-                "session_date": train_end_session,  # raw; we will canonicalize below
+                "session_date": train_end_session,
 
                 "snapshot_id": snapshot_id,
                 "config_hash": meta.get("config_hash"),
@@ -277,7 +351,7 @@ class LiveStore:
                 "market_tz": market_tz,
                 "cutoff_hour": meta.get("cutoff_hour"),
 
-                **strat_meta,
+                **flat_strat_meta,
             })
 
         logger.info(
@@ -290,24 +364,17 @@ class LiveStore:
 
         df = pd.DataFrame(rows)
 
-        # ---- Canonicalize session_date (daily label) robustly ----
-        # Safest if you only need the date label:
-        # take YYYY-MM-DD regardless of timezone suffix or full ISO timestamp.
         raw = df["train_end_session_date"].astype("string")
-        # e.g. "2026-02-20T00:00:00+00:00" -> "2026-02-20"
         date_part = raw.str.slice(0, 10)
-
         df["session_date"] = pd.to_datetime(date_part, errors="coerce")
 
         bad = int(df["session_date"].isna().sum())
         if bad:
-            # log a few examples to diagnose cloud-only parsing failures
             examples = df.loc[df["session_date"].isna(), "train_end_session_date"].head(5).tolist()
             logger.warning("read_all_model_meta: %d/%d session_date parse failures; examples=%s", bad, len(df), examples)
 
         df = df.dropna(subset=["session_date"]).set_index("session_date").sort_index()
 
-        # ---- De-dup by trained_at ----
         if "trained_at_utc" in df.columns:
             ta = pd.to_datetime(df["trained_at_utc"], utc=True, errors="coerce")
             df = df.assign(_trained_at_sort=ta).sort_values(["session_date", "_trained_at_sort"])
@@ -316,10 +383,7 @@ class LiveStore:
         before = len(df)
         df = df[~df.index.duplicated(keep="last")]
         dropped = before - len(df)
-        # if dropped:
-        #     logger.info("read_all_model_meta: dropped %d duplicates by session_date", dropped)
 
-        # logger.info("read_all_model_meta: out shape=%s range=%s..%s", df.shape, df.index.min(), df.index.max())
         return df
     
 

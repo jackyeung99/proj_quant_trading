@@ -132,7 +132,6 @@ class BacktestEngine:
         w_test = w_full.loc[test_mask].fillna(0.0)         # safe: only test rows remain
         state_test = state_full.loc[state_full.index.intersection(ret_test.index)]
 
-        print(state_test)
         ts_df = simulate_strategy_execution(
             ret_test,
             w_test,

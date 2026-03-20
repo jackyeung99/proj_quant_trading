@@ -388,6 +388,7 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
     logger.debug(_df_brief(meta_raw, "meta_raw"))
 
     meta_sd = prep_meta_ts(meta_raw)
+
     logger.info(_df_brief(meta_sd, "meta_sd"))
 
     # ------------------------------------------------------------
@@ -436,7 +437,6 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
             ann_factor=252,
             return_type="simple",  # or "log" if needed
             col_signal="signal",   # your 0/1 column
-            col_xle_weight='XLE_weight'
         )
 
     logger.info("evaluate_portfolio: metrics computed (ann_factor=%d)", ann_factor)
