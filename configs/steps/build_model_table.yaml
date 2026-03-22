@@ -1,5 +1,5 @@
 tag: 'model_ready'
-intraday_assets: ["XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
+intraday_assets: ["SPY", "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
 input_freq: "5Min"        
 intraday_freq: "5min"
 agg_freq: "1D"

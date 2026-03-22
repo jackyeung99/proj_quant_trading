@@ -1,6 +1,6 @@
 run: 
   strategy_name: MultiAssetStateSignal
-  universe: SPY
+  universe: SPY-Sector
   assets: [ "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
   data_path: 'data/gold/freq=1D/tag=model_ready/table.parquet'
 
@@ -10,7 +10,7 @@ run:
     min_frac: 0.05
     w_min: 0
     w_max: 1.0
-    weight_allocation: 'binary'
+    weight_allocation: 'mean_var'
     gamma: 5.0
 
 

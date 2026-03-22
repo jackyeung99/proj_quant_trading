@@ -1,6 +1,6 @@
 
 strategy_name: MultiAssetStateSignal
-universe: SPY
+universe: SPY-Sector
 
 portfolio:
   source: alpaca

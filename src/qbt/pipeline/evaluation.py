@@ -360,7 +360,7 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
     logger.info("evaluate_portfolio: reading weights snapshots")
     weights_raw = live_storage.read_all_weights(strategy=strategy, universe=universe)
     logger.debug(_df_brief(weights_raw, "weights_raw"))
-
+    
     weights_wide, weight_cols = prep_weights_wide(weights_raw)
     logger.info("evaluate_portfolio: weights_wide cols=%d", len(weight_cols))
 
@@ -437,7 +437,17 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
             ann_factor=252,
             return_type="simple",  # or "log" if needed
             col_signal="signal",   # your 0/1 column
+            col_bh='SPY_ret_cc'
         )
+    
+
+    keep = []
+    for i in merged.columns:
+        print(i)
+        if i.endswith('weight'):
+            keep.append(i)
+
+    print(merged[keep])
 
     logger.info("evaluate_portfolio: metrics computed (ann_factor=%d)", ann_factor)
     try:

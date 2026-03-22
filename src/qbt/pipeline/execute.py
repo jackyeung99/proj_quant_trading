@@ -225,7 +225,6 @@ def execute_weights(live_storage: LiveStore, execution_cfg: dict) -> dict:
             min_trade_dollars=k["min_trade_dollars"],
         )
 
-        print(plan)
         if not getattr(plan, "orders", None):
             logger.info(f"No trades required | strategy={strat} universe={universe}")
             return _ret_base(
