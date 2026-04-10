@@ -4,17 +4,17 @@ run:
   assets: [ "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
   data_path: 'data/gold/freq=1D/tag=model_ready/table.parquet'
 
-  params:
-    state_var: rvol
-    state_source: 'asset'
-    min_frac: 0.05
-    w_min: 0
-    w_max: 1.0
-    weight_allocation: 'mean_var'
-    gamma: 5.0
+params:
+  state_var: rvol
+  state_source: 'asset'
+  min_frac: 0.05
+  w_min: 0
+  w_max: 1.0
+  weight_allocation: 'mean_var'
+  gamma: 5.0
 
 
 live:
   retrain_freq: "1D"
   train_lookback_bars: 504
-  min_train_bars: 200
+  min_train_bars: 200 

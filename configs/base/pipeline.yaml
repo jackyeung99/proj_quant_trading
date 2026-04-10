@@ -1,0 +1,19 @@
+
+name: live_trading
+stages:
+  - ingestion
+  - standardization
+  - feature_building
+  - signal_generation
+  - execution
+
+enabled:
+  ingestion: true
+  standardization: False
+  feature_building: False
+  signal_generation: False
+  execution: False
+
+logging:
+  level: INFO
+  log_to_stdout: true

@@ -9,7 +9,7 @@ import pandas as pd
 from qbt.core.logging import get_logger
 
 from qbt.storage.artifacts  import LiveStore
-from qbt.execution.alpaca_client import AlpacaTradingAPI
+# from qbt.execution.alpaca_client import AlpacaTradingAPI
 from qbt.execution.orders import build_qty_orders
 from qbt.execution.weight_math import (
     compute_target_dollars, compute_target_shares, compute_trade_shares, latest_target_row
@@ -30,7 +30,7 @@ META_COLS = {
 
 CASH_LIKE = {"CASH", "USD"}  # keep if you handle cash separately
 
-def _snapshot_portfolio(client: AlpacaTradingAPI) -> tuple[float, pd.Series, pd.Series]:
+def _snapshot_portfolio(client) -> tuple[float, pd.Series, pd.Series]:
     equity = float(client.get_equity())
     pos = client.get_active_positions()
 
@@ -82,7 +82,7 @@ def _load_target_weights(storage: LiveStore, *, strat: str, universe: str):
     return weights_ts, asof, target_w
 
 def _load_prices(
-    client: AlpacaTradingAPI,
+    client,
     symbols: list[str],
 ) -> pd.Series:
     """
@@ -130,7 +130,7 @@ def _load_prices(
 
 
 def _maybe_liquidate_for_holding_period(
-    client: AlpacaTradingAPI,
+    client,
     *,
     dry_run: bool,
     enabled: bool,

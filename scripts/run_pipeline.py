@@ -7,13 +7,16 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 
+import pprint
+
 from qbt.storage.storage import make_storage
 from qbt.storage.artifacts import LiveStore
 from qbt.storage.paths import StoragePaths
 from qbt.pipeline.run import run_pipeline
 from qbt.core.logging import setup_logging
-from qbt.utils.config_parser import load_controlled_cfg
+from qbt.utils.config_parser import load_deployment_cfg
 from qbt.utils.stamping import new_run_id
+from qbt.utils.dependency_handling import resolve_connections, build_data_clients, build_trading_clients
 
 
 def parse_args():
@@ -21,7 +24,7 @@ def parse_args():
     parser.add_argument(
         "--cfg",
         type=str,
-        default="configs/run.yaml",
+        default="configs/deployments/sector_long_only_paper.yaml",
         help="Path to config YAML file",
     )
     return parser.parse_args()
@@ -31,7 +34,7 @@ def main():
     load_dotenv()
     args = parse_args()
 
-    cfg = load_controlled_cfg(Path(args.cfg))
+    cfg = load_deployment_cfg(Path(args.cfg))
     
     # --- per-run id + log path ---
     run_id = new_run_id()
@@ -64,16 +67,29 @@ def main():
             log_file=None,
             force=True,
         )
+    
+    cfg = load_deployment_cfg(args.cfg)
 
-    # inject api keys
-    cfg["sources"]["equities_intraday_15m"]["api_key"] = os.getenv("ALPACA_API_KEY")
-    cfg["sources"]["equities_intraday_15m"]["api_secret"] = os.getenv("ALPACA_API_SECRET")
+    
+    # dependency injection
+    connection_cfg = cfg["connections"]
+    connection = resolve_connections(connection_cfg)
+
+    data_sources = build_data_clients(cfg["dataset"], resolved_connections=connection)
+    trading_clients = build_trading_clients(connection)
 
     storage = make_storage(cfg)
     paths = StoragePaths()
     artifact_store = LiveStore(storage, paths)
 
-    run_pipeline(storage=storage, paths=paths, cfg=cfg, artifact_store=artifact_store)
+    run_pipeline(
+        storage=storage,
+        paths=paths,
+        cfg=cfg,
+        artifact_store=artifact_store,
+        data_sources=data_sources,
+        trading_clients=trading_clients
+    )
 
 
 if __name__ == "__main__":

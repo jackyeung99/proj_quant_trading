@@ -1,0 +1,16 @@
+
+name: sector_intraday_5m
+mode: append
+lookback_days: 1
+
+inputs:
+  - name: sector_equities_5m
+    connection: alpaca_data
+    kind: bars
+    symbols: ["SPY", "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLRE", "XLK", "XLU"]
+    interval: "5Min"
+    params:
+      feed: "iex"
+      adjustment: "all"
+    standardization:
+      profile: equities_intraday_bars

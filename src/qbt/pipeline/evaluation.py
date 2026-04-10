@@ -4,7 +4,7 @@ from typing import Any, Dict, Iterable
 import pandas as pd
 
 from qbt.core.logging import get_logger
-from qbt.execution.alpaca_client import AlpacaTradingAPI
+# from qbt.execution.alpaca_client import AlpacaTradingAPI
 from qbt.storage.artifacts import LiveStore
 from qbt.metrics.summary import compute_portfolio_metrics
 from qbt.data.merge import join_daily, fill_in_force
@@ -293,7 +293,7 @@ def prep_equity_panel(df: pd.DataFrame) -> pd.DataFrame:
 # Main entry
 # ---------------------------------------------------------------------
 
-def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
+def evaluate_portfolio(client, live_storage: LiveStore, execution_cfg: dict) -> dict:
     """
     Evaluation step:
       1) fetch portfolio equity history (UTC)
@@ -312,7 +312,7 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
     if not strategy or not universe:
         logger.warning("evaluate_portfolio: missing strategy_name or universe in execution_cfg")
 
-    client = AlpacaTradingAPI(cfg=execution_cfg.get("alpaca", {}) or {})
+    # client = AlpacaTradingAPI(cfg=execution_cfg.get("alpaca", {}) or {})
     logger.debug("evaluate_portfolio: Alpaca client initialized")
 
     # ------------------------------------------------------------
@@ -362,6 +362,7 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
     logger.debug(_df_brief(weights_raw, "weights_raw"))
     
     weights_wide, weight_cols = prep_weights_wide(weights_raw)
+
     logger.info("evaluate_portfolio: weights_wide cols=%d", len(weight_cols))
 
     # ------------------------------------------------------------
@@ -447,7 +448,7 @@ def evaluate_portfolio(live_storage: LiveStore, execution_cfg: dict) -> dict:
         if i.endswith('weight'):
             keep.append(i)
 
-    print(merged[keep])
+    print(merged)
 
     logger.info("evaluate_portfolio: metrics computed (ann_factor=%d)", ann_factor)
     try:

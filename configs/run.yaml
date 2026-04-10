@@ -17,7 +17,7 @@ silver:
   enabled: False
 
 gold:
-  enabled: True
+  enabled: False
   config: "steps/build_model_table.yaml"
 
 signal:

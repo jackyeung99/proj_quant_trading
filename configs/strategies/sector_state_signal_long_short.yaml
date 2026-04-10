@@ -1,0 +1,20 @@
+run: 
+  strategy_name: 
+  strategy_class: MultiAssetStateSignal
+  universe: SPY-Sector
+  assets: [ "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
+  model_table: 'sector_state_signal'
+
+params:
+  state_var: rvol
+  state_source: asset
+  min_frac: 0.05
+  w_min: 0.0
+  w_max: 1.0
+  weight_allocation: mean_var
+  gamma: 5.0
+
+live:
+  retrain_freq: "1D"
+  train_lookback_bars: 504
+  min_train_bars: 200

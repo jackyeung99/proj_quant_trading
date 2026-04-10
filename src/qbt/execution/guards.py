@@ -5,7 +5,7 @@ import pandas as pd
 import uuid 
 
 from qbt.core.logging import get_logger
-from qbt.execution.alpaca_client import AlpacaTradingAPI
+# from qbt.execution.alpaca_client import AlpacaTradingAPI
 from qbt.storage.artifacts import LiveStore
 
 
@@ -29,7 +29,7 @@ def _release_lock(storage: LiveStore, *, strat: str, universe: str, enabled: boo
 
 
 def _skip_if_open_orders_exist(
-    client: AlpacaTradingAPI,
+    client,
     storage: LiveStore,
     *,
     strat: str,

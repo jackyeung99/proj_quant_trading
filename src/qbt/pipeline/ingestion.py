@@ -16,35 +16,42 @@ logging = get_logger(__name__)
 
 
 
-def ingest_one_source(storage: Storage, paths: StoragePaths, ingestion_cfg: dict, source_cfg: dict, dataset_name: str) -> dict:
+def ingest_one_source(
+    storage: Storage,
+    paths: StoragePaths,
+    dataset_cfg: dict,
+    source_cfg: dict,
+    dataset_name: str,
+    src: Any,
+) -> dict:
+  
+    mode = dataset_cfg.get("mode")
+    lookback = dataset_cfg.get("lookback_days")
+    start_override = dataset_cfg.get("start_override")
+    end_override = dataset_cfg.get("end_override")
 
-    mode = ingestion_cfg.get('mode')
-    lookback = ingestion_cfg.get('lookback_days')
-    start_override = ingestion_cfg.get('start_override', None)
-    end_override = ingestion_cfg.get('end_override', None)
-
-
-    provider = source_cfg.get("provider")
+    provider = source_cfg.get("connection")
     if not provider:
         raise ValueError(f"{dataset_name}: missing provider")
-
-    # cfg-only: pass the *whole* source_cfg into the source
-    # (this is where api_key/api_secret can live if you merged them in the entrypoint)
-    src = create_source(provider, cfg=source_cfg)
 
     results_per_ticker: Dict[str, Any] = {}
 
     logging.info(
-        "INGEST %s | provider=%s |ingestion mode = %s",
-        dataset_name, provider, mode
+        "INGEST %s | provider=%s | ingestion_mode=%s",
+        dataset_name, provider, mode,
     )
 
     symbols = source_cfg.get("symbols", []) or []
     if not symbols:
-        logging.warning("INGEST %s | provider=%s | no symbols configured", dataset_name, provider)
+        logging.warning(
+            "INGEST %s | provider=%s | no symbols configured",
+            dataset_name, provider,
+        )
+
+    last_fetch_start = None
+    last_fetch_end = None
 
     for ticker in symbols:
-
         ticker = str(ticker).strip()
         freq = source_cfg.get("interval")
 
@@ -54,31 +61,27 @@ def ingest_one_source(storage: Storage, paths: StoragePaths, ingestion_cfg: dict
         store_key = paths.bronze_bars_key(freq=freq, ticker=ticker)
         state_key = paths.bronze_bars_state_key(freq=freq, ticker=ticker)
 
-        logging.debug("store_key=%s state_key=%s", store_key, state_key)
-
         last_date = get_last_available_date(storage, state_key)
 
-
         fetch_start, fetch_end = compute_fetch_window(
-                                                    last_date=last_date,
-                                                    lookback_days=lookback,
-                                                    mode=mode,
-                                                    start_override=start_override,
-                                                    end_override= end_override
-                                                )
-
-
-        logging.info(
-            "SOURCE %s | dataset=%s | ticker=%s |freq= %s | fetching %s -> %s",
-            provider, dataset_name, ticker, freq, fetch_start, fetch_end
+            last_date=last_date,
+            lookback_days=lookback,
+            mode=mode,
+            start_override=start_override,
+            end_override=end_override,
         )
 
-        # if a source needs ticker in cfg instead of as arg, it can read it from cfg
-        # but this keeps a clean canonical signature.
+        last_fetch_start = fetch_start
+        last_fetch_end = fetch_end
+
+        logging.info(
+            "SOURCE %s | dataset=%s | ticker=%s | freq=%s | fetching %s -> %s",
+            provider, dataset_name, ticker, freq, fetch_start, fetch_end,
+        )
+
         new_df = src.fetch(ticker=ticker, start=fetch_start, end=fetch_end)
         new_df = src.standardize(new_df)
         src.validate(new_df)
-
 
         if storage.exists(store_key):
             old_df = storage.read_parquet(store_key)
@@ -88,46 +91,62 @@ def ingest_one_source(storage: Storage, paths: StoragePaths, ingestion_cfg: dict
 
         storage.write_parquet(merged, store_key)
 
-        logging.debug(
-            "SOURCE %s | dataset=%s | ticker=%s | rows=%d | stored_at=%s",
-            provider, dataset_name, ticker, len(merged), store_key
-        )
-
         update_state(
             storage,
             state_key,
             merged,
             pull_start=fetch_start,
             pull_end=fetch_end,
-            meta={"ingestion": ingestion_cfg, "source": source_cfg},
+            meta={"ingestion": dataset_cfg, "source": source_cfg},
         )
 
-        results_per_ticker[ticker] = {"store_key": store_key, "rows_new": int(len(new_df))}
+        results_per_ticker[ticker] = {
+            "store_key": store_key,
+            "rows_new": int(len(new_df)),
+        }
 
     return {
         "dataset": dataset_name,
         "provider": provider,
-        "fetch_window": (fetch_start, fetch_end),
+        "fetch_window": (last_fetch_start, last_fetch_end),
         "tickers": results_per_ticker,
     }
 
 
-def ingest_all_sources(storage: Storage, paths:StoragePaths, ingestion_cfg: dict,  sources_cfg: dict) -> dict:
-    logging.debug("Using Storage %s base_dir=%s", storage, getattr(storage, "base_dir", None))
-    logging.debug("Available Sources: %s", available_sources())
-
+def ingest_all_sources(
+    storage: Storage,
+    paths: StoragePaths,
+    dataset_cfg: dict,
+    sources: dict[str, Any],
+) -> dict:
     results: Dict[str, Any] = {}
 
-    for dataset_name, source_cfg in sources_cfg.items():
-        if not isinstance(source_cfg, dict) or not source_cfg.get("enabled", True):
+    for source_cfg in dataset_cfg["inputs"]:
+      
+        if not isinstance(source_cfg, dict):
             continue
 
-        results[str(dataset_name)] = ingest_one_source(
+        source_name = str(source_cfg.get("name"))
+        connection = source_cfg.get("connection", None)
+ 
+        if not connection:
+            raise ValueError(f"{source_name}: missing connection")
+
+        if connection not in sources:
+            raise KeyError(
+                f"{source_name}: connection {connection!r} not found in injected sources. "
+                f"Available: {sorted(sources.keys())}"
+            )
+
+        src = sources[connection]
+
+        results[source_name] = ingest_one_source(
             storage=storage,
             paths=paths,
-            ingestion_cfg=ingestion_cfg,
+            dataset_cfg=dataset_cfg,
             source_cfg=source_cfg,
-            dataset_name=str(dataset_name),
+            dataset_name=source_name,
+            src=src,
         )
 
     return {"ingestion_results": results}

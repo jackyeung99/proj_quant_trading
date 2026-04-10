@@ -37,35 +37,30 @@ TimeInForce = Literal["day", "gtc", "opg", "cls", "ioc", "fok"]
 PositionIntent = Literal["buy_to_open", "buy_to_close", "sell_to_open", "sell_to_close"]
 
 
-class AlpacaTradingAPI:
+class AlpacaTradingClient:
 
 
     def __init__(
-        self, 
+        self,
+        *,
+        api_key: str,
+        api_secret: str,
         cfg: Mapping[str, Any] | None = None,
-        base_url: str = "https://paper-api.alpaca.markets/v2/",
-        data_base_url: str = "https://data.alpaca.markets",
+        base_url: str = "https://data.alpaca.markets",
         timeout_s: int = 60,
     ):
 
-        self.cfg = cfg or {}
+        if not api_key or not api_secret:
+            raise RuntimeError("Missing Alpaca credentials")
 
+        cfg = dict(cfg or {})
+
+        self.api_key = api_key
+        self.api_secret = api_secret
         self.base_url = base_url
-        self.data_base_url = data_base_url
         self.timeout_s = int(timeout_s)
 
-        self.api_key = self.cfg.get(
-            "api_key",
-            os.getenv("ALPACA_API_KEY")
-        )
-        self.api_secret = self.cfg.get(
-            "api_secret",
-            os.getenv("ALPACA_API_SECRET")
-        )
 
-        if not self.api_key or not self.api_secret:
-            raise RuntimeError("Missing Alpaca credentials (api_key/api_secret or env vars)")
-        
 
 
     def get_historical_equity(

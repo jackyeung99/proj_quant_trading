@@ -1,0 +1,11 @@
+dataset:
+  name: sector_intraday_5m
+  refresh_mode: append
+  default_lookback_days: 1
+
+inputs:
+    - name: macro_fred,
+      connection: fred_data
+      symbols: [ "TB3MS" , "DTB4WK", 'OVXCLS', 'DCOILWTICO', 'DHHNGSP', 'GASREGCOVW']
+      params: 
+        interval: "1d"

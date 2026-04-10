@@ -22,15 +22,22 @@ class YFinanceBarsSource(DataSource):
         timestamp, ticker, open, high, low, close, volume (+ optional extras)
     """
 
-    def __init__(self, cfg: Mapping[str, Any] | None = None):
-        super().__init__(cfg=cfg)
-   
-        self.interval = str(cfg.get("interval", "1d"))
-        self.chunk_size_days = int(cfg.get("chunk_size_days", 120))
-        self.retries = int(cfg.get("retries", 3))
-        self.backoff = float(cfg.get("backoff", 1.5))
-        self.auto_adjust = bool(cfg.get("auto_adjust", True))
-        self.actions = bool(cfg.get("actions", False))  # optional
+    def __init__(
+        self,
+        *,
+        interval: str = "1d",
+        chunk_size_days: int = 120,
+        retries: int = 3,
+        backoff: float = 1.5,
+        auto_adjust: bool = True,
+        actions: bool = False,
+    ):
+        self.interval = str(interval)
+        self.chunk_size_days = int(chunk_size_days)
+        self.retries = int(retries)
+        self.backoff = float(backoff)
+        self.auto_adjust = bool(auto_adjust)
+        self.actions = bool(actions)
 
     def fetch(self, ticker: str, start: DateLike, end: DateLike) -> pd.DataFrame:
         ticker = str(ticker).strip()

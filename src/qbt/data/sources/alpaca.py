@@ -25,7 +25,7 @@ DateLike = Union[str, pd.Timestamp]
 # ----------------------------
 
 @register_source('alpaca')
-class AlpacaBarsSource(DataSource):
+class AlpacaDataClient(DataSource):
     """
     Fetch historical 15-minute OHLCV bars from Alpaca Data API.
 
@@ -40,37 +40,33 @@ class AlpacaBarsSource(DataSource):
     """
 
 
-
     def __init__(
         self,
-        cfg: Mapping[str, Any] | None = None,
+        *,
+        api_key: str,
+        api_secret: str,
         base_url: str = "https://data.alpaca.markets",
         timeout_s: int = 60,
+        feed: str = "iex",
+        adjustment: str = "all",
+        limit: int = 10000,
+        sleep_s: float = 0.25,
+        interval: str = "15Min",
     ):
-        super().__init__(cfg=cfg)
+    
 
+        if not api_key or not api_secret:
+            raise RuntimeError("Missing Alpaca credentials")
+
+        self.api_key = api_key
+        self.api_secret = api_secret
         self.base_url = base_url
         self.timeout_s = int(timeout_s)
-
-        # Allow injection; fall back to env (cloud-friendly)
-        self.api_key = cfg.get( 
-                'api_key',
-                os.getenv("ALPACA_API_KEY")
-                )
-        self.api_secret = cfg.get(
-            'api_secret',
-             os.getenv("ALPACA_API_SECRET")
-             )
-        if not self.api_key or not self.api_secret:
-            raise RuntimeError("Missing Alpaca credentials (api_key/api_secret or env vars)")
-
-        # defaults (cfg can override)
-
-        self.feed = str(cfg.get("feed", "iex"))
-        self.adjustment = str(cfg.get("adjustment", "all"))
-        self.limit = int(cfg.get("limit", 10000))
-        self.sleep_s = float(cfg.get("sleep_s", 0.25))
-        self.interval = str(cfg.get('interval', '15Min'))
+        self.feed = str(feed)
+        self.adjustment = str(adjustment)
+        self.limit = int(limit)
+        self.sleep_s = float(sleep_s)
+        self.interval = str(interval)
 
 
     def fetch(

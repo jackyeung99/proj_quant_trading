@@ -17,9 +17,12 @@ class FredMacroSource(DataSource):
       [timestamp, name, value]
     """
 
-    def __init__(self, cfg: Mapping[str, Any] | None = None):
-        super().__init__(cfg=cfg)
-        self.interval =  str(cfg.get("interval", "1d"))
+    def __init__(
+        self,
+        *,
+        interval: str = "1d",
+    ):
+        self.interval = str(interval)
 
     def fetch(self, ticker: str, start, end) -> pd.DataFrame:
         ticker = str(ticker).strip()

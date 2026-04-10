@@ -6,7 +6,7 @@ import math
 import uuid 
 
 from qbt.core.logging import get_logger
-from qbt.execution.alpaca_client import AlpacaTradingAPI
+# from qbt.execution.alpaca_client import AlpacaTradingAPI
 
 
 logger = get_logger(__name__)
@@ -64,7 +64,7 @@ def _build_orders_from_trade_dollars(trade_dollars: pd.Series) -> list[dict]:
 
 
 def _submit_orders(
-    client: AlpacaTradingAPI,
+    client,
     orders: list[dict],
 ) -> None:
 

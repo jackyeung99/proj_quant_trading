@@ -5,7 +5,7 @@ import pandas as pd
 import uuid 
 
 from qbt.core.logging import get_logger
-from qbt.execution.alpaca_client import AlpacaTradingAPI
+# from qbt.execution.alpaca_client import AlpacaTradingAPI
 from qbt.storage.artifacts import LiveStore
 
 from qbt.execution.orders import _submit_orders 
@@ -87,7 +87,7 @@ def _read_knobs(execution_cfg: dict) -> dict:
 
 
 
-def execute_weights(live_storage: LiveStore, execution_cfg: dict) -> dict:
+def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dict:
     k = _read_knobs(execution_cfg)  # keep knobs grouped
 
     strat = k["strat_name"]
@@ -125,7 +125,7 @@ def execute_weights(live_storage: LiveStore, execution_cfg: dict) -> dict:
         )
 
     try:
-        client = AlpacaTradingAPI(cfg=execution_cfg.get("alpaca", {}) or {})
+        # client = AlpacaTradingAPI(cfg=execution_cfg.get("alpaca", {}) or {})
         logger.debug("Alpaca client initialized")
 
         # --------------------------------------------------------------
