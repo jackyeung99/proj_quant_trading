@@ -1,25 +1,24 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Any
+import uuid
+
 import pandas as pd
-import uuid 
 
 from qbt.core.logging import get_logger
-# from qbt.execution.alpaca_client import AlpacaTradingAPI
+from qbt.config.specs import StrategySpec
 from qbt.storage.artifacts import LiveStore
 
-from qbt.execution.orders import _submit_orders 
+from qbt.execution.orders import _submit_orders
 from qbt.execution.guards import _skip_if_open_orders_exist, _acquire_lock, _release_lock
-
 from qbt.execution.rebalancing import (
     plan_rebalance,
-    _write_planned_orders, 
-    _maybe_liquidate_for_holding_period, 
+    _write_planned_orders,
+    _maybe_liquidate_for_holding_period,
     _load_target_weights,
     _snapshot_portfolio,
-    _load_prices
+    _load_prices,
 )
-
 
 logger = get_logger(__name__)
 
@@ -32,8 +31,8 @@ def _ret_base(
     orders: list,
     reason: str | None = None,
     holding_period: dict | None = None,
-    **extra,
-) -> dict:
+    **extra: Any,
+) -> dict[str, Any]:
     out = {
         "strategy_name": strat,
         "universe": universe,
@@ -48,10 +47,12 @@ def _ret_base(
     return out
 
 
-def _read_knobs(execution_cfg: dict) -> dict:
-    strat_name = execution_cfg.get("strategy_name")
-    if not strat_name:
-        raise ValueError("execution_cfg must include 'strategy_name'.")
+def _read_execution_knobs(
+    strategy: StrategySpec,
+    *,
+    run_id: str,
+) -> dict[str, Any]:
+    execution_cfg = strategy.execution or {}
 
     hp = execution_cfg.get("holding_period") or {}
     if not isinstance(hp, dict):
@@ -59,45 +60,56 @@ def _read_knobs(execution_cfg: dict) -> dict:
 
     hp_tif = str(hp.get("tif", "opg")).lower()
     if hp_tif not in ("opg", "cls", "day"):
-        raise ValueError(f"holding_period.tif must be one of 'opg','cls','day' (got {hp_tif!r})")
+        raise ValueError(
+            f"holding_period.tif must be one of 'opg','cls','day' (got {hp_tif!r})"
+        )
 
     return {
-        # core
-        "strat_name": strat_name,
-        "universe": execution_cfg.get("universe", ""),
+        "strat_name": strategy.strategy_name,
+        "universe": strategy.universe,
         "min_trade_dollars": float(execution_cfg.get("min_trade_dollars", 25.0)),
         "dry_run": bool(execution_cfg.get("dry_run", True)),
-        # guards
         "lock_enabled": bool(execution_cfg.get("lock_enabled", True)),
         "allow_replay_same_asof": bool(execution_cfg.get("allow_replay_same_asof", False)),
         "check_open_orders": bool(execution_cfg.get("check_open_orders", True)),
-        # ids
-        "run_id": str(execution_cfg.get("run_id") or uuid.uuid4().hex[:12]),
+        "run_id": str(run_id),
         "exec_id": uuid.uuid4().hex[:12],
-        # holding period
         "hp_enabled": bool(hp.get("enabled", False)),
         "hp_mode": str(hp.get("mode", "liquidate")).lower(),
         "hp_tif": hp_tif,
-        "hp_symbols": hp.get("symbols", None),  # None or list[str]
+        "hp_symbols": hp.get("symbols", None),
         "hp_include_shorts": bool(hp.get("include_shorts", True)),
         "hp_skip_if_open_order": bool(hp.get("skip_if_open_order", True)),
         "hp_fail_on_errors": bool(hp.get("fail_on_errors", False)),
     }
 
 
-
-
-def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dict:
-    k = _read_knobs(execution_cfg)  # keep knobs grouped
+def execute_weights(
+    live_storage: LiveStore,
+    strategy: StrategySpec,
+    client: Any,
+    *, 
+    run_id: str,
+) -> dict[str, Any]:
+    k = _read_execution_knobs(strategy, run_id=run_id)
 
     strat = k["strat_name"]
     universe = k["universe"]
     dry_run = k["dry_run"]
 
     logger.info(
-        f"Execution start | strategy={strat} universe={universe} dry_run={dry_run} "
-        f"min_trade_dollars={k['min_trade_dollars']:.2f} run_id={k['run_id']} exec_id={k['exec_id']} "
-        f"holding_period_enabled={k['hp_enabled']} holding_period_mode={k['hp_mode']} holding_period_tif={k['hp_tif']}"
+        "Execution start | strategy=%s universe=%s dry_run=%s "
+        "min_trade_dollars=%.2f run_id=%s exec_id=%s "
+        "holding_period_enabled=%s holding_period_mode=%s holding_period_tif=%s",
+        strat,
+        universe,
+        dry_run,
+        k["min_trade_dollars"],
+        k["run_id"],
+        k["exec_id"],
+        k["hp_enabled"],
+        k["hp_mode"],
+        k["hp_tif"],
     )
 
     lock = _acquire_lock(
@@ -114,7 +126,12 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
         },
     )
     if lock is not None:
-        logger.warning(f"Execution locked | strategy={strat} universe={universe} lock={lock}")
+        logger.warning(
+            "Execution locked | strategy=%s universe=%s lock=%s",
+            strat,
+            universe,
+            lock,
+        )
         return _ret_base(
             strat=strat,
             universe=universe,
@@ -125,13 +142,7 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
         )
 
     try:
-        # client = AlpacaTradingAPI(cfg=execution_cfg.get("alpaca", {}) or {})
-        logger.debug("Alpaca client initialized")
-
-        # --------------------------------------------------------------
-        # 0) Optional holding-period liquidation (before rebalance)
-        # --------------------------------------------------------------
-        hp_result: Optional[dict] = None
+        hp_result: Optional[dict[str, Any]] = None
         if k["hp_enabled"] and k["hp_mode"] in ("liquidate", "liquidate_then_rebalance"):
             hp_result = _maybe_liquidate_for_holding_period(
                 client,
@@ -164,15 +175,14 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
                     holding_period=hp_result,
                 )
 
-        # --------------------------------------------------------------
-        # 1) Load weights + idempotency
-        # --------------------------------------------------------------
-        _, asof, target_w = _load_target_weights(live_storage, strat=strat, universe=universe)
-
-    
+        _, asof, target_w = _load_target_weights(
+            live_storage,
+            strat=strat,
+            universe=universe,
+        )
 
         if target_w is None or asof is None:
-            logger.warning(f"No target weights found | strategy={strat} universe={universe}")
+            logger.warning("No target weights found | strategy=%s universe=%s", strat, universe)
             return _ret_base(
                 strat=strat,
                 universe=universe,
@@ -182,9 +192,17 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
                 holding_period=hp_result,
             )
 
-        if (not k["allow_replay_same_asof"]) and live_storage.already_executed_asof(strategy=strat, universe=universe, asof=asof):
+        if (not k["allow_replay_same_asof"]) and live_storage.already_executed_asof(
+            strategy=strat,
+            universe=universe,
+            asof=asof,
+        ):
             last_exec = live_storage.read_last_exec(strategy=strat, universe=universe)
-            logger.warning(f"Skip (already executed asof) | asof={asof} last_exec={last_exec}")
+            logger.warning(
+                "Skip (already executed asof) | asof=%s last_exec=%s",
+                asof,
+                last_exec,
+            )
             return _ret_base(
                 strat=strat,
                 universe=universe,
@@ -197,36 +215,36 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
             )
 
         nonzero_w = int((target_w.abs() > 1e-12).sum())
-        logger.info(f"Loaded target weights | asof={asof} assets={len(target_w)} nonzero={nonzero_w}")
+        logger.info(
+            "Loaded target weights | asof=%s assets=%d nonzero=%d",
+            asof,
+            len(target_w),
+            nonzero_w,
+        )
 
-        # --------------------------------------------------------------
-        # 2) Snapshot portfolio state
-        # --------------------------------------------------------------
         equity, current_shares, current_dollars = _snapshot_portfolio(client)
-        logger.info(f"Portfolio state | equity={equity:.2f} positions={len(current_dollars)}")
-
-        # --------------------------------------------------------------
-        # 3) Plan rebalance (ONE call)
-        # --------------------------------------------------------------
+        logger.info(
+            "Portfolio state | equity=%.2f positions=%d",
+            equity,
+            len(current_dollars),
+        )
 
         symbols = sorted(
             set(target_w.index.astype(str)) |
             set(current_shares.index.astype(str))
         )
-    
-        prices = _load_prices(client, symbols )
-
+        prices = _load_prices(client, symbols)
 
         plan = plan_rebalance(
             target_w=target_w,
             equity=equity,
             current_shares=current_shares,
-            prices = prices,
+            prices=prices,
             min_trade_dollars=k["min_trade_dollars"],
         )
 
         if not getattr(plan, "orders", None):
-            logger.info(f"No trades required | strategy={strat} universe={universe}")
+            logger.info("No trades required | strategy=%s universe=%s", strat, universe)
             return _ret_base(
                 strat=strat,
                 universe=universe,
@@ -239,13 +257,12 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
                 holding_period=hp_result,
             )
 
+        logger.info(
+            "Plan built | n_orders=%d gross_notional=%.2f",
+            len(plan.orders),
+            float(plan.gross_notional),
+        )
 
-        logger.info(f"Plan built | n_orders={len(plan.orders)} gross_notional={float(plan.gross_notional):.2f}")
-
-
-        # --------------------------------------------------------------
-        # 4) Persist planned orders
-        # --------------------------------------------------------------
         batch_id, orders_key, orders_df = _write_planned_orders(
             live_storage,
             strat=strat,
@@ -260,11 +277,8 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
             hp_mode=k["hp_mode"],
             hp_tif=k["hp_tif"],
         )
-        logger.info(f"Saved planned orders | batch_id={batch_id} key={orders_key}")
+        logger.info("Saved planned orders | batch_id=%s key=%s", batch_id, orders_key)
 
-        # --------------------------------------------------------------
-        # 5) Dry run exit
-        # --------------------------------------------------------------
         if dry_run:
             logger.warning("Dry run enabled — orders NOT sent")
             return _ret_base(
@@ -280,9 +294,6 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
                 holding_period=hp_result,
             )
 
-        # # --------------------------------------------------------------
-        # # 6) Broker-side open-order guard
-        # # --------------------------------------------------------------
         skip = _skip_if_open_orders_exist(
             client,
             live_storage,
@@ -309,9 +320,6 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
                 skip=skip,
             )
 
-        # --------------------------------------------------------------
-        # 7) Mark submitted + submit orders
-        # --------------------------------------------------------------
         live_storage.write_last_exec(
             strategy=strat,
             universe=universe,
@@ -330,9 +338,6 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
 
         _submit_orders(client, plan.orders)
 
-        # --------------------------------------------------------------
-        # 8) Optional holding-period liquidation (after rebalance)
-        # --------------------------------------------------------------
         if k["hp_enabled"] and k["hp_mode"] == "rebalance_then_liquidate":
             hp_result = _maybe_liquidate_for_holding_period(
                 client,
@@ -347,9 +352,6 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
             if k["hp_fail_on_errors"] and hp_result and hp_result.get("errors"):
                 logger.warning("Holding-period liquidation had errors after rebalance")
 
-        # --------------------------------------------------------------
-        # 9) Save trades + mark completed
-        # --------------------------------------------------------------
         trades_df = orders_df.copy()
         trades_key = live_storage.write_trades_batch(
             strategy=strat,
@@ -357,7 +359,7 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
             trades=trades_df,
             batch_id=batch_id,
         )
-        logger.info(f"Saved trades parquet | batch_id={batch_id} key={trades_key}")
+        logger.info("Saved trades parquet | batch_id=%s key=%s", batch_id, trades_key)
 
         live_storage.write_last_exec(
             strategy=strat,
@@ -377,7 +379,12 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
             },
         )
 
-        logger.info(f"Execution complete | strategy={strat} universe={universe} num_orders={len(plan.orders)}")
+        logger.info(
+            "Execution complete | strategy=%s universe=%s num_orders=%d",
+            strat,
+            universe,
+            len(plan.orders),
+        )
 
         return _ret_base(
             strat=strat,
@@ -395,6 +402,12 @@ def execute_weights(client, live_storage: LiveStore, execution_cfg: dict) -> dic
 
     finally:
         try:
-            _release_lock(live_storage, strat=strat, universe=universe, enabled=k["lock_enabled"], dry_run=dry_run)
+            _release_lock(
+                live_storage,
+                strat=strat,
+                universe=universe,
+                enabled=k["lock_enabled"],
+                dry_run=dry_run,
+            )
         except Exception as e:
-            logger.warning(f"Failed to clear lock | err={e!r}")
+            logger.warning("Failed to clear lock | err=%r", e)

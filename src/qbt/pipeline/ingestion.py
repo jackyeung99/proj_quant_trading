@@ -1,51 +1,49 @@
 from __future__ import annotations
 
 from typing import Any, Dict
-from pathlib import PurePosixPath
-
-import pandas as pd
 
 from qbt.storage.storage import Storage
 from qbt.storage.paths import StoragePaths
-from qbt.data.sources.source_registry import create_source, available_sources
+from qbt.config.specs import DatasetSpec, DatasetSourceSpec
 from qbt.data.state import get_last_available_date, compute_fetch_window, update_state
 from qbt.data.merge import merge_and_dedup
 
 from qbt.core.logging import get_logger
-logging = get_logger(__name__)
 
+logger = get_logger(__name__)
 
 
 def ingest_one_source(
     storage: Storage,
     paths: StoragePaths,
-    dataset_cfg: dict,
-    source_cfg: dict,
-    dataset_name: str,
+    dataset: DatasetSpec,
+    source_spec: DatasetSourceSpec,
     src: Any,
 ) -> dict:
-  
-    mode = dataset_cfg.get("mode")
-    lookback = dataset_cfg.get("lookback_days")
-    start_override = dataset_cfg.get("start_override")
-    end_override = dataset_cfg.get("end_override")
 
-    provider = source_cfg.get("connection")
-    if not provider:
-        raise ValueError(f"{dataset_name}: missing provider")
+    # optional fields if you later add them into DatasetSpec
+    start_override = dataset.aggregation.get("start_override")
+    end_override = dataset.aggregation.get("end_override")
+
+    connection = source_spec.connection
+    if not connection:
+        raise ValueError(f"{source_spec.name}: missing connection")
 
     results_per_ticker: Dict[str, Any] = {}
 
-    logging.info(
-        "INGEST %s | provider=%s | ingestion_mode=%s",
-        dataset_name, provider, mode,
+    logger.info(
+        "INGEST %s | connection=%s | ingestion_mode=%s",
+        source_spec.name,
+        connection,
+        dataset.mode,
     )
 
-    symbols = source_cfg.get("symbols", []) or []
+    symbols = source_spec.symbols or []
     if not symbols:
-        logging.warning(
-            "INGEST %s | provider=%s | no symbols configured",
-            dataset_name, provider,
+        logger.warning(
+            "INGEST %s | connection=%s | no symbols configured",
+            source_spec.name,
+            connection,
         )
 
     last_fetch_start = None
@@ -53,10 +51,10 @@ def ingest_one_source(
 
     for ticker in symbols:
         ticker = str(ticker).strip()
-        freq = source_cfg.get("interval")
-
         if not ticker:
             continue
+
+        freq = source_spec.interval
 
         store_key = paths.bronze_bars_key(freq=freq, ticker=ticker)
         state_key = paths.bronze_bars_state_key(freq=freq, ticker=ticker)
@@ -65,8 +63,8 @@ def ingest_one_source(
 
         fetch_start, fetch_end = compute_fetch_window(
             last_date=last_date,
-            lookback_days=lookback,
-            mode=mode,
+            lookback_days=dataset.lookback_days,
+            mode=dataset.mode,
             start_override=start_override,
             end_override=end_override,
         )
@@ -74,12 +72,24 @@ def ingest_one_source(
         last_fetch_start = fetch_start
         last_fetch_end = fetch_end
 
-        logging.info(
+        logger.info(
             "SOURCE %s | dataset=%s | ticker=%s | freq=%s | fetching %s -> %s",
-            provider, dataset_name, ticker, freq, fetch_start, fetch_end,
+            connection,
+            source_spec.name,
+            ticker,
+            freq,
+            fetch_start,
+            fetch_end,
         )
 
-        new_df = src.fetch(ticker=ticker, start=fetch_start, end=fetch_end)
+        new_df = src.fetch(
+            ticker=ticker,
+            start=fetch_start,
+            end=fetch_end,
+            interval=source_spec.interval,
+            **source_spec.params,
+        )
+
         new_df = src.standardize(new_df)
         src.validate(new_df)
 
@@ -97,7 +107,14 @@ def ingest_one_source(
             merged,
             pull_start=fetch_start,
             pull_end=fetch_end,
-            meta={"ingestion": dataset_cfg, "source": source_cfg},
+            meta={
+                "dataset_name": dataset.name,
+                "dataset_mode": dataset.mode,
+                "source_name": source_spec.name,
+                "connection": source_spec.connection,
+                "interval": source_spec.interval,
+                "params": source_spec.params,
+            },
         )
 
         results_per_ticker[ticker] = {
@@ -106,8 +123,9 @@ def ingest_one_source(
         }
 
     return {
-        "dataset": dataset_name,
-        "provider": provider,
+        "dataset": dataset.name,
+        "source_name": source_spec.name,
+        "connection": connection,
         "fetch_window": (last_fetch_start, last_fetch_end),
         "tickers": results_per_ticker,
     }
@@ -116,36 +134,30 @@ def ingest_one_source(
 def ingest_all_sources(
     storage: Storage,
     paths: StoragePaths,
-    dataset_cfg: dict,
+    dataset: DatasetSpec,
     sources: dict[str, Any],
 ) -> dict:
     results: Dict[str, Any] = {}
 
-    for source_cfg in dataset_cfg["inputs"]:
-      
-        if not isinstance(source_cfg, dict):
-            continue
+    for source_spec in dataset.sources:
+        connection = source_spec.connection
 
-        source_name = str(source_cfg.get("name"))
-        connection = source_cfg.get("connection", None)
- 
         if not connection:
-            raise ValueError(f"{source_name}: missing connection")
+            raise ValueError(f"{source_spec.name}: missing connection")
 
         if connection not in sources:
             raise KeyError(
-                f"{source_name}: connection {connection!r} not found in injected sources. "
+                f"{source_spec.name}: connection {connection!r} not found in injected sources. "
                 f"Available: {sorted(sources.keys())}"
             )
 
         src = sources[connection]
 
-        results[source_name] = ingest_one_source(
+        results[source_spec.name] = ingest_one_source(
             storage=storage,
             paths=paths,
-            dataset_cfg=dataset_cfg,
-            source_cfg=source_cfg,
-            dataset_name=source_name,
+            dataset=dataset,
+            source_spec=source_spec,
             src=src,
         )
 

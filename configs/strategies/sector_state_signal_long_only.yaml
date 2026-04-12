@@ -1,20 +1,35 @@
-run: 
+run:
   strategy_name: MultiAssetStateSignal
+  strategy_class: MultiAssetStateSignal
   universe: SPY-Sector
-  assets: [ "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
-  data_path: 'data/gold/freq=1D/tag=model_ready/table.parquet'
+  assets: ["XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
+  input_table: sector_daily_rv
+  input_table_freq: 1D
+  tag: v1 
+
 
 params:
   state_var: rvol
-  state_source: 'asset'
+  state_source: asset
   min_frac: 0.05
-  w_min: 0
+  w_min: -.50
   w_max: 1.0
-  weight_allocation: 'mean_var'
+  weight_allocation: binary
   gamma: 5.0
 
-
-live:
-  retrain_freq: "1D"
+training:
+  retrain_freq: always
   train_lookback_bars: 504
-  min_train_bars: 200 
+  min_train_bars: 200
+
+
+execution: 
+  connection: alpaca_trading
+  dry_run: True
+  holding_period:
+      enabled: False
+      mode: "rebalance_then_liquidate"          # or "flat_then_rebalance"
+      tif: "opg"                 # "opg" next open, "cls" close, "day" immediate
+      symbols: null              # null => all positions, or ["XLE","XLF"]
+      include_shorts: true
+      skip_if_open_order: true

@@ -6,28 +6,6 @@ import pandas as pd
 SizeLike = Union[int, float, str, None]
 
 
-@dataclass(frozen=True)
-class WalkForwardSpec:
-    train_size: int
-    test_size: int
-    step_size: int
-    expanding: bool = True
-
-@dataclass(frozen=True)
-class RunSpec:
-    # experiment identity
-    strategy_name: str
-    universe: str
-    assets: list[str] = field(default_factory=list)
-    tag: str | None = None
-
-
-    # data + features
-    data_path: str = None 
-    features: dict[str, Any] = field(default_factory=dict)
-
-    # strategy behavior
-    params: dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class ModelBundle:
@@ -40,22 +18,6 @@ class ModelBundle:
     train_end: str
     config_hash: str
 
-    
-@dataclass(frozen=True)
-class BacktestSpec:
-    # --- execution / timing ---
-    weight_lag: int = 1
-    rebalance: str = "D"
-    train_freq: str = "D"
-    transaction_cost_bps: float = 0.0
-
-    # --- evaluation method (optional WF) ---
-    use_walk_forward: bool = False
-    train_size: Optional[int] = None
-    test_size: Optional[int] = None
-    test_start_years: Optional[int] = None
-    expanding: bool = True
-    min_train: Optional[int] = 200
 
 @dataclass(frozen=True)
 class RunMeta:
@@ -94,4 +56,5 @@ class Position:
     cost_basis: float      # dollars
     unrealized_pl: float   # dollars
     unrealized_plpc: float # fraction, e.g. 0.12
+
 

@@ -1,0 +1,58 @@
+dataset:
+  name: sector_daily_rv
+  mode: append 
+  lookback_days: 1
+
+universe:
+  assets: ["SPY", "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
+
+sources:
+  - name: sector_equities_5m
+    connection: alpaca_data
+    kind: bars
+    symbols: ["SPY", "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLRE", "XLK", "XLU"]
+    interval: "5Min"
+    params:
+      feed: "iex"
+      adjustment: "all"
+    standardization:
+      profile: equities_intraday_bars
+
+aggregation:
+  input_freq: "5Min"
+  intraday_freq: "5min"
+  agg_freq: "1D"
+  market_tz: "America/New_York"
+  cutoff_hour: 16.0
+
+features:
+  intraday:
+    - name: rv
+      kind: rv
+      requires: ["close"]
+      params:
+        close_col: "close"
+
+    - name: rvol
+      kind: rvol
+      requires: ["close"]
+
+  daily_transforms:
+    - name: returns
+      kind: log
+      mode: c2c
+
+    - name: returns
+      kind: log
+      mode: o2o
+
+    - name: returns
+      kind: log
+      mode: c2o
+
+    - name: returns
+      kind: log
+      mode: o2c
+
+output:
+  table_name: sector_daily_rv

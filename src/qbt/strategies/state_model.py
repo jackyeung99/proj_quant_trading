@@ -3,7 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from qbt.core.types import RunSpec, ModelInputs
+from qbt.core.types import ModelInputs
+from qbt.config.specs import StrategySpec
 from qbt.strategies.strategy_base import Strategy
 from qbt.strategies.strategy_registry import register_strategy
 from qbt.metrics.summary import _sharpe
@@ -29,7 +30,7 @@ class StateSignalModel(Strategy):
         self.state_var_: str | None = None
         self.state_source_: str | None = None  # "asset" or "global"
 
-    def parse_params(self, spec: RunSpec) -> dict:
+    def parse_params(self, spec: StrategySpec) -> dict:
         params = spec.params or {}
 
         state_var = params.get("state_var")
@@ -44,7 +45,7 @@ class StateSignalModel(Strategy):
             "n_grid": int(params.get("n_grid", 100)),
             "weight_type": str(params.get("weight_allocation", "binary")),
             "w_min": float(params.get("w_min", 0.0)),
-            "w_max": float(params.get("w_high", 1.0)),
+            "w_max": float(params.get("w_max", 1.0)),
             "eps": float(params.get("eps", 1e-12)),
         }
 
@@ -57,7 +58,7 @@ class StateSignalModel(Strategy):
             "state_source": self.state_source_,
         }
 
-    def required_asset_features(self, spec: RunSpec) -> list[str]:
+    def required_asset_features(self, spec: StrategySpec) -> list[str]:
         p = self.parse_params(spec)
         state_var = p["state_var"]
 
@@ -71,7 +72,7 @@ class StateSignalModel(Strategy):
             return []
         return [state_var]
 
-    def required_global_features(self, spec: RunSpec) -> list[str]:
+    def required_global_features(self, spec: StrategySpec) -> list[str]:
         p = self.parse_params(spec)
         state_var = p["state_var"]
 
@@ -84,7 +85,7 @@ class StateSignalModel(Strategy):
             raise ValueError("StateSignalModel expects inputs.ret to be [T x 1].")
         return str(inputs.ret.columns[0])
 
-    def _get_state_series(self, inputs: ModelInputs, spec: RunSpec) -> pd.Series:
+    def _get_state_series(self, inputs: ModelInputs, spec: StrategySpec) -> pd.Series:
         p = self.parse_params(spec)
         state_var = p["state_var"]
         asset = self._get_single_asset(inputs)
@@ -137,7 +138,7 @@ class StateSignalModel(Strategy):
             f"global_features columns: {list(inputs.global_features.columns)}"
         )
 
-    def get_persisted_series(self, *, test_inputs: ModelInputs, spec: RunSpec) -> pd.DataFrame:
+    def get_persisted_series(self, *, test_inputs: ModelInputs, spec: StrategySpec) -> pd.DataFrame:
         S = self._get_state_series(test_inputs, spec).reindex(test_inputs.ret.index)
 
         out = pd.DataFrame(
@@ -152,7 +153,7 @@ class StateSignalModel(Strategy):
         )
         return out
 
-    def fit(self, inputs: ModelInputs, spec: RunSpec) -> None:
+    def fit(self, inputs: ModelInputs, spec: StrategySpec) -> None:
         p = self.parse_params(spec)
         self.state_var_ = p["state_var"]
 
@@ -200,7 +201,7 @@ class StateSignalModel(Strategy):
         self.w_low_ = float(w_low)
         self.w_high_ = float(w_high)
 
-    def predict(self, inputs: ModelInputs, spec: RunSpec) -> pd.DataFrame:
+    def predict(self, inputs: ModelInputs, spec: StrategySpec) -> pd.DataFrame:
         if self.tau_ is None:
             raise RuntimeError("predict called before fit().")
 

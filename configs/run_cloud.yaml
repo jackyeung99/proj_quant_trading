@@ -1,33 +1,30 @@
+
+name: live_trading
+stages:
+  - ingestion
+  - standardization
+  - feature_building
+  - signal_generation
+  - execution
+
+enabled:
+  ingestion: True
+  standardization: True
+  feature_building: True
+  signal_generation: True
+  execution: True
+
+configs:
+  dataset: datasets/sector_daily_5min_rv.yaml
+  strategy: strategies/sector_state_signal_long_only.yaml
+  connections: paper_1.yaml
+
 logging:
   level: INFO
-  log_file: "artifacts/logs/qbt.log"
+  log_to_stdout: true
 
 storage:
-  config: "steps/cloud_storage.yaml"
-
-sources:
-  config: "steps/sources.yaml"
-
-
-ingestion:
-  enabled: True
-  config: "steps/ingestion.yaml"
-
-silver:
-  enabled: True
-
-gold:
-  enabled: True
-  config: "steps/build_model_table.yaml"
-
-signal:
-  enabled: True
-  config: "strategies/run_multi_state.yaml"
-
-execution:
-  enabled: True
-  config: "steps/execution.yaml"
-
-evaluation:
-  enabled: True
-  config: "steps/evaluation.yaml" 
+  backend: s3
+  bucket: quant-trading-project
+  prefix: quant-trading
+  region: us-east-2

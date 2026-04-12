@@ -1,20 +1,25 @@
-run: 
-  strategy_name: 
+run:
+  strategy_name: test
   strategy_class: MultiAssetStateSignal
   universe: SPY-Sector
-  assets: [ "XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
-  model_table: 'sector_state_signal'
+  assets: ["XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
+  tag: null
 
-params:
-  state_var: rvol
-  state_source: asset
-  min_frac: 0.05
-  w_min: 0.0
-  w_max: 1.0
-  weight_allocation: mean_var
-  gamma: 5.0
+data:
+  table_name: sector_daily_rv
+  features: {}
+
+strategy:
+  params:
+    state_var: rvol
+    state_source: asset
+    min_frac: 0.05
+    w_min: -1.0
+    w_max: 1.0
+    weight_allocation: mean_var
+    gamma: 5.0
 
 live:
-  retrain_freq: "1D"
+  retrain_freq: 1D
   train_lookback_bars: 504
   min_train_bars: 200

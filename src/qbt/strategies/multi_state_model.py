@@ -4,7 +4,8 @@ from copy import deepcopy
 from dataclasses import replace
 import pandas as pd
 
-from qbt.core.types import RunSpec, ModelInputs
+from qbt.core.types import ModelInputs
+from qbt.config.specs import StrategySpec
 from qbt.strategies.strategy_base import Strategy
 from qbt.strategies.strategy_registry import register_strategy
 
@@ -34,7 +35,7 @@ class MultiStateSignalModel(Strategy):
         self.models_: dict[str, StateSignalModel] = {}
         self.assets_: list[str] = []
 
-    def required_asset_features(self, spec: RunSpec) -> list[str]:
+    def required_asset_features(self, spec: StrategySpec) -> list[str]:
         # same requirement as the single-asset model
         params = spec.params or {}
         state_source = params.get("state_source", "asset")
@@ -45,7 +46,7 @@ class MultiStateSignalModel(Strategy):
             raise ValueError("MultiStateSignalModel requires params['state_var'].")
         return [str(state_var)]
 
-    def required_global_features(self, spec: RunSpec) -> list[str]:
+    def required_global_features(self, spec: StrategySpec) -> list[str]:
         params = spec.params or {}
         state_source = params.get("state_source", "asset")
         if state_source != "global":
@@ -56,10 +57,10 @@ class MultiStateSignalModel(Strategy):
         return [str(state_var)]
 
 
-    def _child_spec(self, spec: RunSpec, *, m: int) -> RunSpec:
+    def _child_spec(self, spec: StrategySpec, *, m: int) -> StrategySpec:
         params = dict(spec.params or {})
-        params["w_min"] = 0.0
-        params["w_high"] = 1.0 / float(m)
+        params["w_min"] = float(params["w_min"]) / float(m)
+        params["w_max"] = float(params["w_max"]) / float(m)
 
         return replace(spec, params=params)
 
@@ -79,13 +80,14 @@ class MultiStateSignalModel(Strategy):
             global_features=inputs.global_features.copy(),
         )
 
-    def fit(self, inputs: ModelInputs, spec: RunSpec) -> None:
+    def fit(self, inputs: ModelInputs, spec: StrategySpec) -> None:
         assets = list(inputs.ret.columns)
         if not assets:
             raise ValueError("MultiStateSignalModel.fit received no assets.")
 
         m = len(assets)
         child_spec = self._child_spec(spec, m=m)
+
 
         self.assets_ = assets
         self.models_ = {}
@@ -96,7 +98,7 @@ class MultiStateSignalModel(Strategy):
             model.fit(child_inputs, child_spec)
             self.models_[asset] = model
 
-    def predict(self, inputs: ModelInputs, spec: RunSpec) -> pd.DataFrame:
+    def predict(self, inputs: ModelInputs, spec: StrategySpec) -> pd.DataFrame:
         if not self.models_:
             raise RuntimeError("predict called before fit().")
 
@@ -135,7 +137,7 @@ class MultiStateSignalModel(Strategy):
             },
         }
 
-    def get_persisted_series(self, *, test_inputs: ModelInputs, spec: RunSpec) -> pd.DataFrame:
+    def get_persisted_series(self, *, test_inputs: ModelInputs, spec: StrategySpec) -> pd.DataFrame:
         if not self.models_:
             return pd.DataFrame(index=test_inputs.ret.index)
 

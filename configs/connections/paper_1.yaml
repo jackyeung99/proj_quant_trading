@@ -1,25 +1,20 @@
+connections:
+  alpaca_data:
+    provider: alpaca
+    connection: alpaca_data
+    credential_source: env
+    env:
+      api_key: ALPACA_API_KEY
+      api_secret: ALPACA_API_SECRET
+    endpoints:
+      data_base_url: https://data.alpaca.markets
 
-alpaca_data:
-  provider: alpaca
-  connection: alpaca_data
-  credential_source: env
-  env:
-    api_key: ALPACA_API_KEY
-    api_secret: ALPACA_API_SECRET
-  endpoints:
-    data_base_url: https://data.alpaca.markets
-  options:
-    feed: iex
-    adjustment: all
-    timeout_s: 60
-    limit: 10000
-    sleep_s: 0.25
-
-alpaca_trading:
-  provider: alpaca
-  credential_source: env
-  env:
-    api_key: ALPACA_API_KEY
-    api_secret: ALPACA_API_SECRET
-  endpoints:
-    trading_base_url: https://paper-api.alpaca.markets
+  alpaca_trading:
+    provider: alpaca
+    credential_source: env
+    env:
+      api_key: ALPACA_API_KEY
+      api_secret: ALPACA_API_SECRET
+    endpoints:
+      base_url: "https://paper-api.alpaca.markets/v2/"
+      data_base_url: "https://data.alpaca.markets"

@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 import pandas as pd
+from typing import Optional, Union
+
 from pandas_datareader import data as pdr
 
 from qbt.data.sources.source_registry import register_source
 from qbt.data.sources.source_base import DataSource
 
+
+DateLike = Union[str, pd.Timestamp]
 
 @register_source("fred")
 class FredMacroSource(DataSource):
@@ -24,7 +28,12 @@ class FredMacroSource(DataSource):
     ):
         self.interval = str(interval)
 
-    def fetch(self, ticker: str, start, end) -> pd.DataFrame:
+    def fetch(self,
+            ticker: str,
+            start: DateLike, 
+            end: DateLike,
+            interval: str = "15Min",
+            ) -> pd.DataFrame:
         ticker = str(ticker).strip()
         if not ticker:
             return pd.DataFrame(columns=["timestamp", "name", "value"])

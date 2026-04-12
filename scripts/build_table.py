@@ -10,11 +10,11 @@ from qbt.storage.artifacts import LiveStore
 from qbt.storage.paths import StoragePaths
 
 from qbt.core.logging import setup_logging
-from qbt.utils.config_parser import load_controlled_cfg
+from qbt.configs.parser import load_controlled_cfg
 from qbt.utils.stamping import new_run_id
 
 from qbt.pipeline.ingestion import ingest_all_sources
-from qbt.pipeline.silver import canonicalize_all
+from qbt.pipeline.standardization import canonicalize_all
 from qbt.pipeline.gold import build_gold_model_table
 
 def main():

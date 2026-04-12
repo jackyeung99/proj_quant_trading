@@ -302,7 +302,7 @@ class S3Storage(Storage):
 
 
 def make_storage(cfg: dict) -> Storage:
-    s = cfg["storage"]
+    s = cfg
     backend = s["backend"].lower()
 
     if backend == "local":

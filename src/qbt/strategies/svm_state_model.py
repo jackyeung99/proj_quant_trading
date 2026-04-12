@@ -6,7 +6,8 @@ from sklearn import svm
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from qbt.core.types import RunSpec, ModelInputs
+from qbt.core.types import  ModelInputs
+from qbt.config.specs import StrategySpec
 from qbt.strategies.strategy_base import Strategy
 from qbt.strategies.strategy_registry import register_strategy
 from qbt.core.logging import get_logger
@@ -22,7 +23,7 @@ class SVMStateSignalModel(Strategy):
         self.w_high_: float = 0.0
         self.state_vars: list[str] = []
 
-    def parse_params(self, spec: RunSpec) -> dict:
+    def parse_params(self, spec: StrategySpec) -> dict:
         params = spec.params or {}
 
         # Accept either "features" or old "state_var"
@@ -49,10 +50,10 @@ class SVMStateSignalModel(Strategy):
             "svm_params": dict(params.get("svm_params", {})),
         }
 
-    def required_features(self, spec: RunSpec) -> list[str]:
+    def required_features(self, spec: StrategySpec) -> list[str]:
         return self.parse_params(spec)["features"]
 
-    def fit(self, inputs: ModelInputs, spec: RunSpec) -> None:
+    def fit(self, inputs: ModelInputs, spec: StrategySpec) -> None:
         p = self.parse_params(spec)
         self.state_vars = p["features"]
         self.lag_state_ = p["lag_state"]
@@ -98,7 +99,7 @@ class SVMStateSignalModel(Strategy):
         self.w_low_ = float(w_low)
         self.w_high_ = float(w_high)
 
-    def predict(self, inputs: ModelInputs, spec: RunSpec) -> pd.Series:
+    def predict(self, inputs: ModelInputs, spec: StrategySpec) -> pd.Series:
         if self.svm_model is None:
             # If a fold had too little data, just output 0 weights
             return pd.Series(0.0, index=inputs.ret.index, name="weight")

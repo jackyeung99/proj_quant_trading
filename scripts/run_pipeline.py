@@ -1,31 +1,30 @@
 from __future__ import annotations
-import os
-import logging
 import argparse
-from dotenv import load_dotenv
+import logging
 from pathlib import Path
-from datetime import datetime
-import uuid
+from dotenv import load_dotenv
 
-import pprint
-
-from qbt.storage.storage import make_storage
-from qbt.storage.artifacts import LiveStore
-from qbt.storage.paths import StoragePaths
-from qbt.pipeline.run import run_pipeline
-from qbt.core.logging import setup_logging
-from qbt.utils.config_parser import load_deployment_cfg
+from qbt.config.loader import load_yaml
+from qbt.config.parsers import (
+    parse_pipeline_spec,
+    parse_dataset_spec,
+    parse_strategy_spec,
+    parse_connection_specs,
+)
+from qbt.config.validation import validate_specs
+from qbt.runtime import build_runtime
+from qbt.pipeline.runner import run_pipeline
 from qbt.utils.stamping import new_run_id
-from qbt.utils.dependency_handling import resolve_connections, build_data_clients, build_trading_clients
+from qbt.core.logging import setup_logging
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run QBT pipeline")
     parser.add_argument(
-        "--cfg",
+        "--pipeline",
         type=str,
-        default="configs/deployments/sector_long_only_paper.yaml",
-        help="Path to config YAML file",
+        default="configs/run.yaml",
+        help="Path to pipeline YAML file",
     )
     return parser.parse_args()
 
@@ -34,61 +33,43 @@ def main():
     load_dotenv()
     args = parse_args()
 
-    cfg = load_deployment_cfg(Path(args.cfg))
-    
-    # --- per-run id + log path ---
+    raw_pipeline = load_yaml(Path(args.pipeline))
+    pipeline_spec = parse_pipeline_spec(raw_pipeline)
+
+
+    raw_dataset = load_yaml(Path(pipeline_spec.configs["dataset"]))
+    raw_strategy = load_yaml(Path(pipeline_spec.configs["strategy"]))
+    raw_connections = load_yaml(Path(pipeline_spec.configs["connections"]))
+
+    dataset_spec = parse_dataset_spec(raw_dataset)
+    strategy_spec = parse_strategy_spec(raw_strategy)
+    connection_specs = parse_connection_specs(raw_connections)
+
+    validate_specs(
+        pipeline=pipeline_spec,
+        dataset=dataset_spec,
+        strategy=strategy_spec,
+        connections=connection_specs,
+    )
+
     run_id = new_run_id()
-    cfg["run_id"] = run_id
-    storage_cfg = cfg["storage"]
-    backend = storage_cfg.get("backend", "local")
 
+    setup_logging(level=logging.INFO, log_file=None, force=True)
 
-    if backend == "local":
-        base_dir = Path(storage_cfg.get("base_dir", "."))
-        log_path = (
-            base_dir
-            / "artifacts"
-            / "runs"
-            / f"run_id={run_id}"
-            / "logs"
-            / "app.log"
-        )
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime = build_runtime(
+        pipeline=pipeline_spec,
+        connections=connection_specs,
+        dataset=dataset_spec,
+        strategy=strategy_spec, 
+        run_id=run_id,
+    )
 
-        setup_logging(
-            level=logging.INFO,
-            log_file=log_path,
-            force=True,
-        )
-    else:
-        # Cloud / ECS → log to stdout only
-        setup_logging(
-            level=logging.INFO,
-            log_file=None,
-            force=True,
-        )
-    
-    cfg = load_deployment_cfg(args.cfg)
-
-    
-    # dependency injection
-    connection_cfg = cfg["connections"]
-    connection = resolve_connections(connection_cfg)
-
-    data_sources = build_data_clients(cfg["dataset"], resolved_connections=connection)
-    trading_clients = build_trading_clients(connection)
-
-    storage = make_storage(cfg)
-    paths = StoragePaths()
-    artifact_store = LiveStore(storage, paths)
 
     run_pipeline(
-        storage=storage,
-        paths=paths,
-        cfg=cfg,
-        artifact_store=artifact_store,
-        data_sources=data_sources,
-        trading_clients=trading_clients
+        runtime=runtime,
+        pipeline=pipeline_spec,
+        dataset=dataset_spec,
+        strategy=strategy_spec,
     )
 
 

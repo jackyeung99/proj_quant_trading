@@ -1,33 +1,26 @@
-logging:
-  level: INFO
-  log_file: "artifacts/logs/qbt.log"
+
+name: local
+stages:
+  - ingestion
+  - standardization
+  - feature_building
+  - signal_generation
+  - execution
+  - evaluation
+
+enabled:
+  ingestion: False
+  standardization: False
+  feature_building: False
+  signal_generation: True
+  execution: True
+  evaluation: True
+
+configs:
+  dataset: configs/datasets/sector_daily_5min_rv.yaml
+  strategy: configs/strategies/sector_state_signal_long_only.yaml
+  connections: configs/connections/paper_1.yaml
 
 storage:
-  config: "steps/storage.yaml"
-
-sources:
-  config: "steps/sources.yaml"
-
-
-ingestion:
-  enabled: False
-  config: "steps/ingestion.yaml"
-
-silver:
-  enabled: False
-
-gold:
-  enabled: False
-  config: "steps/build_model_table.yaml"
-
-signal:
-  enabled: False
-  config: "strategies/run_multi_state.yaml"
-
-execution: 
-  enabled: False
-  config: "steps/execution.yaml"
-
-evaluation:
-  enabled: True
-  config: "steps/evaluation.yaml" 
+  backend: local
+  base_dir: "."

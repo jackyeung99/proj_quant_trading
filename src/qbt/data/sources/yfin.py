@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Mapping, Union
+from typing import Union
 
 import pandas as pd
 import yfinance as yf
@@ -17,13 +17,20 @@ class YFinanceBarsSource(DataSource):
     """
     Single-ticker yfinance fetcher.
 
-    fetch(): returns concatenated raw chunks (index not assumed datetime)
-    standardize(): enforces canonical tidy schema (no pivot):
-        timestamp, ticker, open, high, low, close, volume (+ optional extras)
+    fetch(): returns concatenated raw chunks
+    standardize(): enforces canonical tidy schema:
+        timestamp, ticker, open, high, low, close, volume
+        plus optional extras when present
     """
 
-    def __init__(
+    def __init__(self) -> None:
+        pass
+
+    def fetch(
         self,
+        ticker: str,
+        start: DateLike,
+        end: DateLike,
         *,
         interval: str = "1d",
         chunk_size_days: int = 120,
@@ -31,25 +38,26 @@ class YFinanceBarsSource(DataSource):
         backoff: float = 1.5,
         auto_adjust: bool = True,
         actions: bool = False,
-    ):
-        self.interval = str(interval)
-        self.chunk_size_days = int(chunk_size_days)
-        self.retries = int(retries)
-        self.backoff = float(backoff)
-        self.auto_adjust = bool(auto_adjust)
-        self.actions = bool(actions)
-
-    def fetch(self, ticker: str, start: DateLike, end: DateLike) -> pd.DataFrame:
+    ) -> pd.DataFrame:
         ticker = str(ticker).strip()
         if not ticker:
             return pd.DataFrame()
 
         start_ts, end_ts = self._normalize_utc_range(start, end)
-        chunks = self.chunk_range(start_ts, end_ts, chunk_days=self.chunk_size_days)
+        chunks = self.chunk_range(start_ts, end_ts, chunk_days=int(chunk_size_days))
 
         pieces: list[pd.DataFrame] = []
         for cstart, cend in chunks:
-            raw_piece = self._fetch_one_chunk(ticker=ticker, cstart=cstart, cend=cend)
+            raw_piece = self._fetch_one_chunk(
+                ticker=ticker,
+                cstart=cstart,
+                cend=cend,
+                interval=str(interval),
+                retries=int(retries),
+                backoff=float(backoff),
+                auto_adjust=bool(auto_adjust),
+                actions=bool(actions),
+            )
             if raw_piece is None or raw_piece.empty:
                 continue
             pieces.append(raw_piece)
@@ -57,47 +65,31 @@ class YFinanceBarsSource(DataSource):
         if not pieces:
             return pd.DataFrame()
 
-        # No assumptions here: just concatenate
         return pd.concat(pieces, ignore_index=True)
 
     def standardize(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Make canonical tidy schema from raw yfinance output.
-        - does NOT assume index is datetime
-        - flattens MultiIndex columns
-        - renames timestamp + OHLCV
-        - parses timestamp UTC
-        - sorts + drops duplicates on (ticker, timestamp)
-        """
         if df is None or df.empty:
             return pd.DataFrame(columns=self._base_cols())
 
         df = df.copy()
 
-        # ---- flatten columns if MultiIndex ----
         if isinstance(df.columns, pd.MultiIndex):
-            # keep the last level; preserves Open/High/Low/Close/Volume
             df.columns = [str(c[0]) for c in df.columns]
 
-        # ---- find timestamp column ----
-        # yfinance reset_index commonly yields "Date" or "Datetime" (or sometimes "index")
         ts_col = None
         for cand in ("timestamp", "Datetime", "Date", "index"):
             if cand in df.columns:
                 ts_col = cand
                 break
         if ts_col is None:
-            # fallback: first column is probably the index column from reset_index()
             ts_col = df.columns[0]
 
         if ts_col != "timestamp":
             df = df.rename(columns={ts_col: "timestamp"})
 
-        # ticker column: in our pipeline we add it in _fetch_one_chunk
         if "ticker" not in df.columns:
             raise ValueError("yfinance: missing 'ticker' column (expected added in fetch)")
 
-        # ---- rename Yahoo columns -> canonical ----
         rename = {
             "Open": "open",
             "High": "high",
@@ -110,12 +102,10 @@ class YFinanceBarsSource(DataSource):
         }
         df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
 
-        # ---- ensure required cols exist ----
         for c in self._base_cols():
             if c not in df.columns:
                 df[c] = pd.NA
 
-        # ---- parse + coerce types ----
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
         df["ticker"] = df["ticker"].astype(str)
 
@@ -126,7 +116,6 @@ class YFinanceBarsSource(DataSource):
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
 
-        # ---- canonical ordering + dedup ----
         df = (
             df.dropna(subset=["timestamp", "ticker"])
               .sort_values(["ticker", "timestamp"])
@@ -134,7 +123,6 @@ class YFinanceBarsSource(DataSource):
               .reset_index(drop=True)
         )
 
-        # keep base cols + any optional extras that exist
         base = self._base_cols()
         extras = [c for c in ["adj_close", "dividends", "stock_splits"] if c in df.columns]
         return df[base + extras]
@@ -167,20 +155,27 @@ class YFinanceBarsSource(DataSource):
         if (df["volume"].dropna() < 0).any():
             raise ValueError("yfinance: found negative volume")
 
-    # ----------------------------
-    # Internal
-    # ----------------------------
-
-    def _fetch_one_chunk(self, *, ticker: str, cstart: pd.Timestamp, cend: pd.Timestamp) -> pd.DataFrame:
-        for attempt in range(self.retries):
+    def _fetch_one_chunk(
+        self,
+        *,
+        ticker: str,
+        cstart: pd.Timestamp,
+        cend: pd.Timestamp,
+        interval: str,
+        retries: int,
+        backoff: float,
+        auto_adjust: bool,
+        actions: bool,
+    ) -> pd.DataFrame:
+        for attempt in range(retries):
             try:
                 raw = yf.download(
                     tickers=ticker,
                     start=cstart.tz_convert(None),
                     end=cend.tz_convert(None),
-                    interval=self.interval,
-                    auto_adjust=self.auto_adjust,
-                    actions=self.actions,
+                    interval=interval,
+                    auto_adjust=auto_adjust,
+                    actions=actions,
                     progress=False,
                     threads=False,
                     group_by="column",
@@ -190,19 +185,22 @@ class YFinanceBarsSource(DataSource):
                     raise RuntimeError(f"Empty dataframe for {ticker}")
 
                 raw = raw.copy()
-
-                # Important: do NOT assume index type; just reset to a column
                 out = raw.reset_index()
                 out["ticker"] = ticker
                 return out
 
             except Exception:
-                time.sleep(self.backoff * (2**attempt))
+                time.sleep(backoff * (2**attempt))
 
         return pd.DataFrame()
 
     @staticmethod
-    def chunk_range(start: pd.Timestamp, end: pd.Timestamp, *, chunk_days: int) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    def chunk_range(
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        *,
+        chunk_days: int,
+    ) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
         out: list[tuple[pd.Timestamp, pd.Timestamp]] = []
         cur = start
         step = pd.Timedelta(days=chunk_days)
@@ -213,7 +211,10 @@ class YFinanceBarsSource(DataSource):
         return out
 
     @staticmethod
-    def _normalize_utc_range(start: DateLike, end: DateLike) -> tuple[pd.Timestamp, pd.Timestamp]:
+    def _normalize_utc_range(
+        start: DateLike,
+        end: DateLike,
+    ) -> tuple[pd.Timestamp, pd.Timestamp]:
         start_ts = pd.to_datetime(start, utc=True)
         end_ts = pd.to_datetime(end, utc=True)
         if end_ts == end_ts.normalize():

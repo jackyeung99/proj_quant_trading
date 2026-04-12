@@ -4,7 +4,8 @@ from abc import ABC, abstractmethod
 from typing import List
 import pandas as pd
 
-from qbt.core.types import RunSpec, ModelInputs
+from qbt.core.types import  ModelInputs
+from qbt.config.specs import StrategySpec
 
 
 class Strategy(ABC):
@@ -14,7 +15,7 @@ class Strategy(ABC):
     """
 
     @abstractmethod
-    def required_asset_features(self, spec: RunSpec) -> List[str]:
+    def required_asset_features(self, spec: StrategySpec) -> List[str]:
         """
         Per-asset feature names needed by the model, excluding returns.
 
@@ -27,7 +28,7 @@ class Strategy(ABC):
         """
         raise NotImplementedError
 
-    def required_global_features(self, spec: RunSpec) -> List[str]:
+    def required_global_features(self, spec: StrategySpec) -> List[str]:
         """
         Shared/global feature names needed by the model.
 
@@ -41,12 +42,12 @@ class Strategy(ABC):
         return []
 
     @abstractmethod
-    def fit(self, inputs: ModelInputs, spec: RunSpec) -> None:
+    def fit(self, inputs: ModelInputs, spec: StrategySpec) -> None:
         """Fit model on training window."""
         raise NotImplementedError
 
     @abstractmethod
-    def predict(self, inputs: ModelInputs, spec: RunSpec) -> pd.Series | pd.DataFrame:
+    def predict(self, inputs: ModelInputs, spec: StrategySpec) -> pd.Series | pd.DataFrame:
         """
         Produce signals aligned to features.index.
 

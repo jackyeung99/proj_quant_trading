@@ -46,7 +46,8 @@ class AlpacaTradingClient:
         api_key: str,
         api_secret: str,
         cfg: Mapping[str, Any] | None = None,
-        base_url: str = "https://data.alpaca.markets",
+        base_url: str = "https://paper-api.alpaca.markets/v2/",
+        data_base_url: str = "https://data.alpaca.markets",
         timeout_s: int = 60,
     ):
 
@@ -58,6 +59,7 @@ class AlpacaTradingClient:
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = base_url
+        self.data_base_url = data_base_url
         self.timeout_s = int(timeout_s)
 
 

@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional, Sequence
 
 import pandas as pd
 
-from qbt.core.types import ModelInputs, RunSpec
+from qbt.core.types import ModelInputs
+from qbt.config.specs import StrategySpec
 from qbt.storage.storage import Storage
+from qbt.storage.paths import StoragePaths
 
 
 class DataAdapter:
-    def load(self, spec: RunSpec) -> pd.DataFrame: ...
-    def prepare(self, raw: pd.DataFrame, spec: RunSpec, required_cols: list[str]) -> ModelInputs: ...
+    def load(self, spec: StrategySpec) -> pd.DataFrame: ...
+    def prepare(
+        self,
+        raw: pd.DataFrame,
+        spec: StrategySpec,
+        required_asset_features: list[str],
+    ) -> ModelInputs: ...
 
 
 @dataclass
@@ -21,45 +27,37 @@ class WidePrefixDataAdapter(DataAdapter):
     Assumes a wide modeling table with columns like:
       - session_date / timestamp / date
       - XLE_ret_cc, XLK_ret_cc, ...
-      - XLE_rvol_20, XLK_rvol_20, ...
+      - XLE_rvol, XLK_rvol, ...
       - OVX, DGS10, TBILL_3M, ...   # global features
 
-    Returns:
-      ModelInputs(
-          ret=<wide return matrix indexed by time, columns=asset>,
-          asset_features={
-              "rvol_20": <wide panel indexed by time, columns=asset>,
-              "mom_60": <wide panel indexed by time, columns=asset>,
-          },
-          global_features=<df indexed by time with macro/global cols>
-      )
+    Responsibilities:
+      1. Resolve and load the wide gold/model table from storage using spec.input_table
+      2. Adapt the raw table into ModelInputs
     """
     storage: Storage
+    paths: StoragePaths
     default_time_candidates: Sequence[str] = ("session_date", "timestamp", "date", "time")
     default_ret_suffixes: Sequence[str] = ("ret_cc",)
     assume_naive_tz: str = "UTC"
 
-    def load(self, spec: RunSpec) -> pd.DataFrame:
-        data_path = spec.data_path
-        if not data_path:
-            raise ValueError("spec.data_path must be set.")
+    def load(self, spec: StrategySpec) -> pd.DataFrame:
+        input_table = spec.input_table
+        if not input_table:
+            raise ValueError("strategy.input_table must be set.")
 
-        key = str(data_path).lstrip("/")
+        key = self.paths.gold_table_key(freq=spec.input_table_freq, tag=input_table)
+
         if not self.storage.exists(key):
-            raise FileNotFoundError(f"Modeling table not found: {key}")
+            raise FileNotFoundError(
+                f"Model table not found for input_table='{input_table}': {key}"
+            )
 
-        suffix = Path(key).suffix.lower()
-        if suffix == ".parquet":
-            return self.storage.read_parquet(key)
-        if suffix == ".csv":
-            return self.storage.read_csv(key)
-
-        raise ValueError(f"Unsupported file format: {suffix}")
+        return self.storage.read_parquet(key)
 
     def prepare(
         self,
         raw: pd.DataFrame,
-        spec: RunSpec,
+        spec: StrategySpec,
         required_asset_features: Sequence[str],
         required_global_features: Sequence[str] = (),
         *,
@@ -106,19 +104,13 @@ class WidePrefixDataAdapter(DataAdapter):
     def _resolve_assets(
         self,
         *,
-        spec: RunSpec,
+        spec: StrategySpec,
         assets: Optional[Sequence[str]],
     ) -> Optional[list[str]]:
         if assets is not None:
             resolved = list(assets)
         else:
-            universe = getattr(spec, "universe", None)
-            if universe is None:
-                return None
-            if isinstance(universe, str):
-                resolved = [universe]
-            else:
-                resolved = list(universe)
+            resolved = list(spec.assets or [])
 
         resolved = [a for a in resolved if a is not None and str(a) != ""]
         if not resolved:
