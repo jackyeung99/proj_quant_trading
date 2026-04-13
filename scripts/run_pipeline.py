@@ -21,7 +21,7 @@ from qbt.core.logging import setup_logging
 def parse_args():
     parser = argparse.ArgumentParser(description="Run QBT pipeline")
     parser.add_argument(
-        "--pipeline",
+        "--config",
         type=str,
         default="configs/run.yaml",
         help="Path to pipeline YAML file",
@@ -33,7 +33,7 @@ def main():
     load_dotenv()
     args = parse_args()
 
-    raw_pipeline = load_yaml(Path(args.pipeline))
+    raw_pipeline = load_yaml(Path(args.config))
     pipeline_spec = parse_pipeline_spec(raw_pipeline)
 
 
