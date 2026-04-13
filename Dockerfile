@@ -41,4 +41,4 @@ RUN mkdir -p /app/data /app/artifacts
 ENTRYPOINT ["python", "/app/scripts/run_pipeline.py"]
 
 # ---- DEFAULT ARGS (can be overridden by ECS/ECR) ----
-CMD ["--cfg", "/app/configs/run_cloud.yaml"]
+CMD ["--cfg", "/app/configs/deployments/sector_deployment_long_only.yaml"]

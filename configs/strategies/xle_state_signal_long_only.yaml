@@ -1,5 +1,5 @@
 run:
-  strategy_name: xle_vol_regime
+  strategy_name: xle-vol-regime-long-only
   strategy_class: StateSignal
   universe: SPY-Sector
   assets: ["XLE"]

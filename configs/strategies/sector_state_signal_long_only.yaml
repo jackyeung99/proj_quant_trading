@@ -1,5 +1,5 @@
 run:
-  strategy_name: vol-regime-long-only
+  strategy_name: sector-vol-regime-long-only
   strategy_class: MultiAssetStateSignal
   universe: SPY-Sector
   assets: ["XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]

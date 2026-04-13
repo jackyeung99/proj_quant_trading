@@ -18,7 +18,7 @@ enabled:
 
 configs:
   dataset: configs/datasets/sector_daily_5min_rv.yaml
-  strategy: configs/strategies/sector_state_signal_long_short.yaml
+  strategy: configs/strategies/xle_state_signal_long_only.yaml
   connections: configs/connections/paper_1.yaml
 
 storage:

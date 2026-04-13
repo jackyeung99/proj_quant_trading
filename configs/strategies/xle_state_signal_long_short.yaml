@@ -1,8 +1,8 @@
 run:
-  strategy_name: vol-regime-long-short
-  strategy_class: MultiAssetStateSignal
+  strategy_name: xle-vol-regime-long-short
+  strategy_class: StateSignal
   universe: SPY-Sector
-  assets: ["XLE", "XLC", "XLY", "XLP", "XLF", "XLV", "XLI", "XLB", "XLK", "XLU"]
+  assets: ["XLE"]
   input_table: sector_daily_rv
   input_table_freq: 1D
   tag: v1 
@@ -14,7 +14,7 @@ params:
   min_frac: 0.05
   w_min: -.5
   w_max: 1.0
-  weight_allocation: binary
+  weight_allocation: mean_var
   gamma: 5.0
 
 training:
@@ -25,7 +25,7 @@ training:
 
 execution: 
   connection: alpaca_trading
-  dry_run: False
+  dry_run: True
   holding_period:
       enabled: False
       mode: "rebalance_then_liquidate"          # or "flat_then_rebalance"
