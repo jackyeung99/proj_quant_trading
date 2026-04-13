@@ -9,17 +9,17 @@ stages:
   - evaluation
 
 enabled:
-  ingestion: False
-  standardization: False
-  feature_building: False
+  ingestion: True
+  standardization: True
+  feature_building: True
   signal_generation: True
   execution: True
   evaluation: True
 
 configs:
   dataset: configs/datasets/sector_daily_5min_rv.yaml
-  strategy: configs/strategies/sector_state_signal_long_only.yaml
-  connections: configs/connections/paper_1.yaml
+  strategy: configs/strategies/sector_state_signal_long_short.yaml
+  connections: configs/connections/test_paper_account.yaml
 
 storage:
   backend: local

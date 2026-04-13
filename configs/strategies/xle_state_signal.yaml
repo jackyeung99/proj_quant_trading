@@ -1,21 +1,35 @@
-run: 
-  strategy_name: StateSignal
-  universe: XLE
-  tag: rv_regime_5m
-  assets: ['XLE']
-  data_path: 'data/gold/freq=1D/tag=experiment/table.parquet'
-
-  params:
-    state_var: rvol
-    state_source: 'asset'
-    min_frac: 0.05
-    w_min: 0
-    w_max: 1.0
-    weight_allocation: 'mean_var'
-    gamma: 5.0
+run:
+  strategy_name: xle_vol_regime
+  strategy_class: StateSignal
+  universe: SPY-Sector
+  assets: ["XLE"]
+  input_table: sector_daily_rv
+  input_table_freq: 1D
+  tag: v1 
 
 
-live:
-  retrain_freq: "1D"
+params:
+  state_var: rvol
+  state_source: asset
+  min_frac: 0.05
+  w_min: 0
+  w_max: 1.0
+  weight_allocation: mean_var
+  gamma: 5.0
+
+training:
+  retrain_freq: always
   train_lookback_bars: 504
   min_train_bars: 200
+
+
+execution: 
+  connection: alpaca_trading
+  dry_run: True
+  holding_period:
+      enabled: False
+      mode: "rebalance_then_liquidate"          # or "flat_then_rebalance"
+      tif: "opg"                 # "opg" next open, "cls" close, "day" immediate
+      symbols: null              # null => all positions, or ["XLE","XLF"]
+      include_shorts: true
+      skip_if_open_order: true

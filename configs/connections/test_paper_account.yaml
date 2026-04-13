@@ -1,0 +1,20 @@
+connections:
+  alpaca_data:
+    provider: alpaca
+    connection: alpaca_data
+    credential_source: env
+    env:
+      api_key: ALPACA_API_KEY_TEST
+      api_secret: ALPACA_API_SECRET_TEST
+    endpoints:
+      data_base_url: https://data.alpaca.markets
+
+  alpaca_trading:
+    provider: alpaca
+    credential_source: env
+    env:
+      api_key: ALPACA_API_KEY_TEST
+      api_secret: ALPACA_API_SECRET_TEST
+    endpoints:
+      base_url: "https://paper-api.alpaca.markets/v2/"
+      data_base_url: "https://data.alpaca.markets"

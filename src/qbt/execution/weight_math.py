@@ -1,7 +1,7 @@
 import pandas as pd 
 from qbt.core.types import Position
 from typing import Dict, Optional, Tuple
-
+import math
 
 def _round_qty(q: float, *, step: float = 1e-6) -> float:
     # Alpaca fractional qty precision is typically 1e-6
@@ -125,3 +125,44 @@ def compute_trade_shares(
 
 
 
+def adjust_trade_shares_for_broker(
+    *,
+    raw_trade_shares: pd.Series,
+    current_shares: pd.Series,
+    prices: pd.Series,
+    min_trade_dollars: float,
+) -> pd.Series:
+    adjusted = {}
+
+    for sym, dq in raw_trade_shares.items():
+        dq = float(dq)
+        cur = float(current_shares.get(sym, 0.0))
+        px = float(prices.get(sym, 0.0))
+
+        if px <= 0:
+            adjusted[sym] = 0.0
+            continue
+
+        if abs(dq) * px < min_trade_dollars:
+            adjusted[sym] = 0.0
+            continue
+
+        # Buys can remain fractional
+        if dq > 0:
+            adjusted[sym] = dq
+            continue
+
+        # Sell logic
+        sell_qty = abs(dq)
+
+        # fractional reduction of existing long is allowed
+        reducible_long = min(max(cur, 0.0), sell_qty)
+
+        # new short portion must be integer
+        short_open = max(0.0, sell_qty - reducible_long)
+        short_open = math.floor(short_open)
+
+        adj_sell = reducible_long + short_open
+        adjusted[sym] = -adj_sell
+
+    return pd.Series(adjusted, index=raw_trade_shares.index).fillna(0.0)

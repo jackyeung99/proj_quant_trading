@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# ---- System deps ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -19,22 +20,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- Install deps (cache-friendly) ----
+# ---- Install Python deps ----
 COPY requirements-cloud.txt /app/requirements-cloud.txt
 RUN python -m pip install --upgrade pip && \
     pip install -r /app/requirements-cloud.txt
 
-# ---- Copy project code + configs ----
+# ---- Copy project ----
 COPY pyproject.toml /app/pyproject.toml
 COPY src /app/src
 COPY configs /app/configs
 COPY scripts /app/scripts
 
-# If you want editable install (optional). If you don't need it, remove this line.
+# optional editable install
 RUN pip install -e .
 
-RUN mkdir -p /app/data
+# runtime dirs
+RUN mkdir -p /app/data /app/artifacts
 
-ENV CFG_PATH=/app/configs/run_all_cloud.yaml
-CMD ["python",  "/app/scripts/run_pipeline.py", "--cfg", "/app/configs/run_cloud.yaml"]
+# ---- DEFAULT ENTRYPOINT (NOT HARDCODED CFG) ----
+ENTRYPOINT ["python", "/app/scripts/run_pipeline.py"]
 
+# ---- DEFAULT ARGS (can be overridden by ECS/ECR) ----
+CMD ["--cfg", "/app/configs/run_cloud.yaml"]

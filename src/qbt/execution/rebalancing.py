@@ -12,7 +12,7 @@ from qbt.storage.artifacts  import LiveStore
 # from qbt.execution.alpaca_client import AlpacaTradingAPI
 from qbt.execution.orders import build_qty_orders
 from qbt.execution.weight_math import (
-    compute_target_dollars, compute_target_shares, compute_trade_shares, latest_target_row
+    compute_target_dollars, compute_target_shares, compute_trade_shares, latest_target_row, adjust_trade_shares_for_broker
 )
 
 logger = get_logger(__name__)
@@ -252,15 +252,17 @@ def _write_planned_orders(
     )
     return batch_id, orders_key, orders_df
 
-
-@dataclass(frozen=True)
+@dataclass
 class RebalancePlan:
     prices: pd.Series
     target_dollars: pd.Series
     target_shares: pd.Series
+    raw_trade_shares: pd.Series
     trade_shares: pd.Series
+    expected_shares: pd.Series
     orders: list[dict]
     gross_notional: float
+
 
 
 def plan_rebalance(
@@ -272,40 +274,52 @@ def plan_rebalance(
     min_trade_dollars: float,
 ) -> RebalancePlan:
 
+    prices = prices.astype(float)
+    current_shares = current_shares.reindex(prices.index).fillna(0.0).astype(float)
+    target_w = target_w.reindex(prices.index).fillna(0.0).astype(float)
+
     target_dollars = compute_target_dollars(
         target_w,
         equity_value=equity,
-    )
+    ).reindex(prices.index).fillna(0.0)
 
-    target_dollars = target_dollars.reindex(prices.index).fillna(0.0)
-
- 
     target_shares = compute_target_shares(
         target_dollars,
         prices,
-    )
+    ).reindex(prices.index).fillna(0.0)
 
-    trade_shares = compute_trade_shares(
+    raw_trade_shares = compute_trade_shares(
         target_shares=target_shares,
-        current_shares=current_shares.reindex(target_shares.index).fillna(0.0),
+        current_shares=current_shares,
+        prices=prices,
+        min_trade_dollars=min_trade_dollars,
+    ).reindex(prices.index).fillna(0.0)
+
+    adjusted_trade_shares = adjust_trade_shares_for_broker(
+        raw_trade_shares=raw_trade_shares,
+        current_shares=current_shares,
         prices=prices,
         min_trade_dollars=min_trade_dollars,
     )
 
     orders = build_qty_orders(
-        trade_shares,
+        adjusted_trade_shares,
         current_shares=current_shares,
     )
 
+    expected_shares = current_shares.add(adjusted_trade_shares, fill_value=0.0)
+
     gross_notional = float(
-        (trade_shares.abs() * prices.reindex(trade_shares.index)).sum()
+        (adjusted_trade_shares.abs() * prices.reindex(adjusted_trade_shares.index)).sum()
     )
 
     return RebalancePlan(
         prices=prices,
         target_dollars=target_dollars,
         target_shares=target_shares,
-        trade_shares=trade_shares,
+        trade_shares=adjusted_trade_shares,
         orders=orders,
         gross_notional=gross_notional,
+        raw_trade_shares=raw_trade_shares,
+        expected_shares=expected_shares,
     )

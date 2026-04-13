@@ -1,0 +1,28 @@
+
+name: live_sector_vol_regime_long_short
+stages:
+  - ingestion
+  - standardization
+  - feature_building
+  - signal_generation
+  - execution
+  - evaluation
+
+enabled:
+  ingestion: True
+  standardization: True
+  feature_building: True
+  signal_generation: True
+  execution: True
+  evaluation: True
+
+configs:
+  dataset: configs/datasets/sector_daily_5min_rv.yaml
+  strategy: configs/strategies/sector_state_signal_long_short.yaml
+  connections: configs/connections/paper_1.yaml
+
+storage:
+  backend: s3
+  bucket: quant-trading-project
+  prefix: quant-trading
+  region: us-east-2
