@@ -17,7 +17,7 @@ The framework supports:
 
 This project was developed as part of an independent research initiative focused on volatility forecasting, systematic portfolio construction, and live trading infrastructure.
 
-Key design goals:
+### Design Principles
 
 - **Modularity** — interchangeable data sources, signals, and execution engines
 - **Reproducibility** — configuration-driven pipelines and artifact tracking
@@ -204,20 +204,6 @@ The platform supports cloud deployment using:
 
 Each strategy can run as an isolated ECS task using separate deployment configurations.
 
-
-# Design Principles
-
-## Configuration-Driven
-
-Strategies, datasets, and deployments are controlled through YAML configuration files rather than hardcoded logic.
-
-## Modular Pipelines
-
-Each stage of the pipeline is independently executable and testable.
-
-## Research First
-
-The framework prioritizes rapid experimentation while maintaining production-grade structure.
 
 # Future Improvements
 
