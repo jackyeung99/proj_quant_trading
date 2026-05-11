@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument(
         "--config",
         type=str,
-        default="configs/run.yaml",
+        default="configs/local_test.yaml",
         help="Path to pipeline YAML file",
     )
     return parser.parse_args()

@@ -1,5 +1,5 @@
 
-name: local
+name: live_sector_vol_regime_long_short
 stages:
   - ingestion
   - standardization
@@ -9,17 +9,17 @@ stages:
   - evaluation
 
 enabled:
-  ingestion: True
-  standardization: True
-  feature_building: True
-  signal_generation: True
-  execution: True
+  ingestion: False
+  standardization: False
+  feature_building: False
+  signal_generation: False
+  execution: False
   evaluation: True
 
 configs:
   dataset: configs/datasets/sector_daily_5min_rv.yaml
-  strategy: configs/strategies/sector_state_signal_long_short.yaml
-  connections: configs/connections/test_paper_account.yaml
+  strategy: configs/strategies/xle_state_signal_long_only.yaml
+  connections: configs/connections/paper_1.yaml
 
 storage:
   backend: local

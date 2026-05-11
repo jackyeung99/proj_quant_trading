@@ -25,7 +25,7 @@ training:
 
 execution: 
   connection: alpaca_trading
-  dry_run: True
+  dry_run: False
   holding_period:
       enabled: False
       mode: "rebalance_then_liquidate"          # or "flat_then_rebalance"
